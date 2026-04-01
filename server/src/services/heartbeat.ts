@@ -344,12 +344,16 @@ type SessionCompactionDecision = {
   previousRunId: string | null;
 };
 
-export type RateLimitFallbackTarget = {
+export type AdapterFallbackChainEntry = {
   adapterType: string;
   adapterConfig: Record<string, unknown>;
+  enabled?: boolean;
 };
 
-const PORTABLE_RATE_LIMIT_FALLBACK_CONFIG_KEYS = [
+/** @deprecated Use AdapterFallbackChainEntry instead */
+export type RateLimitFallbackTarget = AdapterFallbackChainEntry;
+
+const PORTABLE_FALLBACK_CONFIG_KEYS = [
   "bootstrapPromptTemplate",
   "cwd",
   "env",
@@ -545,6 +549,11 @@ function readRawUsageTotals(usageJson: unknown): UsageTotals | null {
   };
 }
 
+function describeAdapterExecutionError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  return String(error);
+}
+
 function deriveNormalizedUsageDelta(current: UsageTotals | null, previous: UsageTotals | null): UsageTotals | null {
   if (!current) return null;
   if (!previous) return { ...current };
@@ -723,30 +732,92 @@ export function formatRuntimeWorkspaceWarningLog(warning: string) {
   };
 }
 
+/**
+ * Read the legacy single-entry rateLimitFallback from a config object.
+ * Returns a 1-entry chain or empty array. Backward-compatible: no adapter restriction.
+ */
+function readLegacyRateLimitFallback(
+  runtimeConfig: Record<string, unknown>,
+): AdapterFallbackChainEntry[] {
+  const fallback = parseObject(runtimeConfig.rateLimitFallback);
+  if (Object.keys(fallback).length === 0) return [];
+  if (fallback.enabled === false) return [];
+
+  const adapterType = readNonEmptyString(fallback.adapterType);
+  if (!adapterType) return [];
+
+  return [{
+    adapterType,
+    adapterConfig: parseObject(fallback.adapterConfig),
+    enabled: true,
+  }];
+}
+
+/**
+ * Read the new adapterFallbackChain array from a config object.
+ * Each entry must have a valid adapterType. Entries with enabled=false are filtered out.
+ */
+function readAdapterFallbackChainConfig(
+  runtimeConfig: Record<string, unknown>,
+): AdapterFallbackChainEntry[] {
+  const raw = runtimeConfig.adapterFallbackChain;
+  if (!Array.isArray(raw)) return [];
+
+  const entries: AdapterFallbackChainEntry[] = [];
+  for (const item of raw) {
+    const entry = parseObject(item);
+    if (entry.enabled === false) continue;
+    const adapterType = readNonEmptyString(entry.adapterType);
+    if (!adapterType) continue;
+    entries.push({
+      adapterType,
+      adapterConfig: parseObject(entry.adapterConfig),
+      enabled: true,
+    });
+  }
+  return entries;
+}
+
+/**
+ * Resolve the adapter fallback chain from multiple config sources.
+ * Tries adapterFallbackChain first, then falls back to legacy rateLimitFallback.
+ * No adapter-type restriction — any adapter can have any fallback chain.
+ */
+export function resolveAdapterFallbackChain(
+  _primaryAdapterType: string,
+  ...configs: Record<string, unknown>[]
+): AdapterFallbackChainEntry[] {
+  for (const cfg of configs) {
+    const chain = readAdapterFallbackChainConfig(cfg);
+    if (chain.length > 0) return chain;
+  }
+  // Fall back to legacy single-entry format
+  for (const cfg of configs) {
+    const legacy = readLegacyRateLimitFallback(cfg);
+    if (legacy.length > 0) return legacy;
+  }
+  return [];
+}
+
+/**
+ * @deprecated Use resolveAdapterFallbackChain instead.
+ * Kept for backward-compat with existing tests during migration.
+ */
 export function resolveRateLimitFallbackTarget(
   primaryAdapterType: string,
   runtimeConfig: Record<string, unknown>,
-): RateLimitFallbackTarget | null {
-  if (primaryAdapterType !== "claude_local") return null;
-
-  const fallback = parseObject(runtimeConfig.rateLimitFallback);
-  if (Object.keys(fallback).length === 0) return null;
-  if (fallback.enabled === false) return null;
-
-  const adapterType = readNonEmptyString(fallback.adapterType);
-  if (adapterType !== "codex_local") return null;
-
-  return {
-    adapterType,
-    adapterConfig: parseObject(fallback.adapterConfig),
-  };
+): AdapterFallbackChainEntry | null {
+  const chain = resolveAdapterFallbackChain(primaryAdapterType, runtimeConfig);
+  return chain.length > 0 ? chain[0]! : null;
 }
 
-export function shouldUseRateLimitFallback(
+/**
+ * Check if a fallback should be attempted based on the adapter result.
+ * Returns true when the result indicates a rate-limit or quota error.
+ */
+export function isRateLimitError(
   result: Pick<AdapterExecutionResult, "errorCode" | "errorMessage" | "resultJson" | "timedOut" | "exitCode">,
-  fallback: RateLimitFallbackTarget | null,
-): fallback is RateLimitFallbackTarget {
-  if (!fallback) return false;
+): boolean {
   if (result.timedOut) return false;
   if ((result.exitCode ?? 0) === 0) return false;
   if (result.errorCode === "claude_rate_limited") return true;
@@ -769,6 +840,31 @@ export function shouldUseRateLimitFallback(
   );
 }
 
+export function shouldContinueFallbackChain(
+  result: Pick<AdapterExecutionResult, "timedOut" | "exitCode">,
+): boolean {
+  if (result.timedOut) return true;
+  return result.exitCode !== 0;
+}
+
+function describeFallbackReason(result: Pick<AdapterExecutionResult, "timedOut" | "errorCode">): string {
+  if (result.timedOut) return "timed out";
+  if (isRateLimitError({ ...result, exitCode: 1 })) return "hit a rate limit";
+  return "failed";
+}
+
+/**
+ * @deprecated Use isRateLimitError instead.
+ * Kept for backward-compat with existing tests.
+ */
+export function shouldUseRateLimitFallback(
+  result: Pick<AdapterExecutionResult, "errorCode" | "errorMessage" | "resultJson" | "timedOut" | "exitCode">,
+  fallback: AdapterFallbackChainEntry | null,
+): fallback is AdapterFallbackChainEntry {
+  if (!fallback) return false;
+  return isRateLimitError(result);
+}
+
 export function stripAdapterSessionState(result: AdapterExecutionResult): AdapterExecutionResult {
   return {
     ...result,
@@ -779,22 +875,50 @@ export function stripAdapterSessionState(result: AdapterExecutionResult): Adapte
   };
 }
 
-export function buildRateLimitFallbackConfig(
+export function buildFallbackConfig(
   primaryRuntimeConfig: Record<string, unknown>,
-  fallback: RateLimitFallbackTarget,
+  fallback: AdapterFallbackChainEntry,
 ): Record<string, unknown> {
   const portableConfig = Object.fromEntries(
-    PORTABLE_RATE_LIMIT_FALLBACK_CONFIG_KEYS.flatMap((key) =>
+    PORTABLE_FALLBACK_CONFIG_KEYS.flatMap((key) =>
       Object.prototype.hasOwnProperty.call(primaryRuntimeConfig, key)
         ? [[key, primaryRuntimeConfig[key]]]
         : [],
     ),
   );
 
-  return {
-    ...portableConfig,
+  const adapterSpecificConfig = {
     ...fallback.adapterConfig,
   };
+  if (fallback.adapterType === "codex_local") {
+    if (
+      typeof adapterSpecificConfig.dangerouslyBypassApprovalsAndSandbox !== "boolean" &&
+      typeof adapterSpecificConfig.dangerouslyBypassSandbox !== "boolean"
+    ) {
+      adapterSpecificConfig.dangerouslyBypassApprovalsAndSandbox = true;
+    }
+    const extraArgs = Array.isArray(adapterSpecificConfig.extraArgs)
+      ? adapterSpecificConfig.extraArgs.filter((value): value is string => typeof value === "string")
+      : [];
+    if (!extraArgs.includes("--skip-git-repo-check")) {
+      adapterSpecificConfig.extraArgs = [...extraArgs, "--skip-git-repo-check"];
+    }
+  }
+
+  return {
+    ...portableConfig,
+    ...adapterSpecificConfig,
+  };
+}
+
+/**
+ * @deprecated Use buildFallbackConfig instead.
+ */
+export function buildRateLimitFallbackConfig(
+  primaryRuntimeConfig: Record<string, unknown>,
+  fallback: AdapterFallbackChainEntry,
+): Record<string, unknown> {
+  return buildFallbackConfig(primaryRuntimeConfig, fallback);
 }
 
 function describeSessionResetReason(
@@ -2864,17 +2988,18 @@ export function heartbeatService(db: Db) {
         await appendRunEventBestEffort(currentRun, eventSeq, {
           eventType: "adapter.invoke",
           stream: "system",
-          level: "info",
+        level: "info",
           message: "adapter invocation",
           payload: meta as unknown as Record<string, unknown>,
         }, "adapter.invoke");
       };
-
       const adapter = getServerAdapter(agent.adapterType);
-      const rateLimitFallback =
-        resolveRateLimitFallbackTarget(agent.adapterType, mergedConfig) ??
-        resolveRateLimitFallbackTarget(agent.adapterType, parseObject(agent.adapterConfig)) ??
-        resolveRateLimitFallbackTarget(agent.adapterType, executionRunConfig);
+      const fallbackChain = resolveAdapterFallbackChain(
+        agent.adapterType,
+        mergedConfig,
+        parseObject(agent.adapterConfig),
+        executionRunConfig,
+      );
       const authToken = adapter.supportsLocalAgentJwt
         ? createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id)
         : null;
@@ -2927,28 +3052,50 @@ export function heartbeatService(db: Db) {
         authToken: authToken ?? undefined,
       });
 
-      // ---------------------------------------------------------------------------
-      // Adapter fallback chain
-      // ---------------------------------------------------------------------------
-      const primaryFailed =
-        adapterResult.timedOut ||
-        ((adapterResult.exitCode ?? 0) !== 0 && adapterResult.exitCode !== null) ||
-        !!adapterResult.errorMessage;
-      if (primaryFailed) {
-        const rawFallbackChain = (parseObject(agent.adapterConfig) as Record<string, unknown>).adapterFallbackChain;
-        const fallbackChain: AdapterFallbackEntry[] = Array.isArray(rawFallbackChain) ? rawFallbackChain as AdapterFallbackEntry[] : [];
-        if (fallbackChain.length > 0) {
-          const failureCategory = categorizeAdapterError(adapterResult.errorCode);
-          await appendRunEvent(currentRun, seq++, {
-            eventType: "adapter.fallback",
-            stream: "system",
-            level: "warn",
-            message: `primary adapter failed with category "${failureCategory}", attempting fallback chain`,
-            payload: {
-              primaryAdapterType: agent.adapterType,
-              primaryErrorCode: adapterResult.errorCode ?? null,
-              failureCategory,
-              fallbackChainLength: fallbackChain.length,
+      // --- Adapter fallback chain ---
+      // Iterate through configured fallback adapters on rate-limit/quota errors.
+      // Each step: try the fallback adapter; if it also hits rate limits, continue to next.
+      let previousAdapterType = agent.adapterType;
+      let shouldAttemptFallback = isRateLimitError(adapterResult);
+      for (let chainIdx = 0; chainIdx < fallbackChain.length; chainIdx++) {
+        const chainEntry = fallbackChain[chainIdx]!;
+
+        // Log the fallback decision for this chain entry
+        const decisionSeq = seq++;
+        await appendRunEventBestEffort(currentRun, decisionSeq, {
+          eventType: "adapter.fallback.decision",
+          stream: "system",
+          level: shouldAttemptFallback ? "warn" : "info",
+          message: shouldAttemptFallback
+            ? `fallback decision: retry with ${chainEntry.adapterType} (chain step ${chainIdx + 1}/${fallbackChain.length})`
+            : `fallback decision: no retry needed (chain step ${chainIdx + 1}/${fallbackChain.length})`,
+          payload: {
+            configured: true,
+            chainIndex: chainIdx,
+            chainLength: fallbackChain.length,
+            fallbackAdapterType: chainEntry.adapterType,
+            errorCode: adapterResult.errorCode ?? null,
+            errorMessage: adapterResult.errorMessage ?? null,
+            exitCode: adapterResult.exitCode ?? null,
+            timedOut: adapterResult.timedOut,
+          },
+        }, "adapter.fallback.decision");
+
+        if (!shouldAttemptFallback) break;
+
+        // Execute the fallback adapter
+        const fallbackAdapter = getServerAdapter(chainEntry.adapterType);
+        const fallbackConfig = buildFallbackConfig(runtimeConfig, chainEntry);
+        const fallbackAuthToken = fallbackAdapter.supportsLocalAgentJwt
+          ? createLocalAgentJwt(agent.id, agent.companyId, chainEntry.adapterType, run.id)
+          : null;
+        if (fallbackAdapter.supportsLocalAgentJwt && !fallbackAuthToken) {
+          logger.warn(
+            {
+              companyId: agent.companyId,
+              agentId: agent.id,
+              runId: run.id,
+              adapterType: chainEntry.adapterType,
             },
           });
           let fallbackSucceeded = false;
@@ -3052,6 +3199,69 @@ export function heartbeatService(db: Db) {
             });
           }
         }
+        const fbEventSeq = seq++;
+        await appendRunEventBestEffort(currentRun, fbEventSeq, {
+          eventType: "adapter.fallback",
+          stream: "system",
+          level: "warn",
+          message: `${previousAdapterType} ${describeFallbackReason(adapterResult)}; retrying with ${chainEntry.adapterType} (chain step ${chainIdx + 1}/${fallbackChain.length})`,
+          payload: {
+            from: previousAdapterType,
+            to: chainEntry.adapterType,
+            chainIndex: chainIdx,
+            reason: adapterResult.errorCode,
+          },
+        }, "adapter.fallback");
+        await onLog(
+          "stdout",
+          `[paperclip] ${previousAdapterType} ${describeFallbackReason(adapterResult)}; retrying this heartbeat with ${chainEntry.adapterType} (fallback ${chainIdx + 1}/${fallbackChain.length}).\n`,
+        );
+        const fallbackAgent = {
+          ...agent,
+          adapterType: chainEntry.adapterType,
+          adapterConfig: fallbackConfig,
+        };
+        const fallbackRuntime = {
+          ...runtimeForAdapter,
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+        };
+        let fallbackResult: AdapterExecutionResult;
+        try {
+          fallbackResult = await fallbackAdapter.execute({
+            runId: run.id,
+            agent: fallbackAgent,
+            runtime: fallbackRuntime,
+            config: fallbackConfig,
+            context,
+            onLog,
+            onMeta: onAdapterMeta,
+            onSpawn: async (meta) => {
+              await persistRunProcessMetadata(run.id, meta);
+            },
+            authToken: fallbackAuthToken ?? undefined,
+          });
+        } catch (error) {
+          const message = describeAdapterExecutionError(error);
+          await appendRunEventBestEffort(currentRun, seq++, {
+            eventType: "error",
+            stream: "system",
+            level: "error",
+            message,
+          }, "adapter.fallback.error");
+          fallbackResult = {
+            exitCode: null,
+            signal: null,
+            timedOut: false,
+            errorCode: "adapter_failed",
+            errorMessage: message,
+          };
+        }
+        previousAdapterType = chainEntry.adapterType;
+        executedAdapterType = chainEntry.adapterType;
+        adapterResult = stripAdapterSessionState(fallbackResult);
+        shouldAttemptFallback = shouldContinueFallbackChain(adapterResult);
       }
 
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
@@ -4242,6 +4452,7 @@ export function heartbeatService(db: Db) {
     },
 
     getRun,
+    executeRun,
 
     getRuntimeState: async (agentId: string) => {
       const state = await getRuntimeState(agentId);
