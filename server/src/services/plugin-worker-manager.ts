@@ -21,6 +21,7 @@
 import { fork, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 import type { PaperclipPluginManifestV1 } from "@paperclipai/shared";
 import {
   JSONRPC_VERSION,
@@ -616,7 +617,11 @@ export function createPluginWorkerHandle(
       TZ: process.env.TZ ?? "UTC",
     };
 
-    const child = fork(options.entrypointPath, [], {
+    // Convert to file:// URL for Windows ESM compatibility.
+    // On Windows, fork() with ESM modules rejects raw paths like C:\...
+    const entrypoint = pathToFileURL(options.entrypointPath).href;
+
+    const child = fork(entrypoint, [], {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       execArgv: options.execArgv ?? [],
       env: workerEnv,
