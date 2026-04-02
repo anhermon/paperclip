@@ -53,6 +53,7 @@ import {
   resolveExecutionWorkspaceMode,
 } from "./execution-workspace-policy.js";
 import { instanceSettingsService } from "./instance-settings.js";
+import { agentMemoryService } from "./agent-memory.js";
 import { redactCurrentUserText, redactCurrentUserValue } from "../log-redaction.js";
 import {
   hasSessionCompactionThresholds,
@@ -900,6 +901,7 @@ export function heartbeatService(db: Db) {
   const secretsSvc = secretService(db);
   const companySkills = companySkillService(db);
   const issuesSvc = issueService(db);
+  const agentMemorySvc = agentMemoryService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const workspaceOperationsSvc = workspaceOperationService(db);
   const activeRunExecutions = new Set<string>();
@@ -2500,6 +2502,23 @@ export function heartbeatService(db: Db) {
       sessionDisplayId: previousSessionDisplayId,
       taskKey,
     };
+
+    // ── Recall durable memory artifacts for this heartbeat ─────────
+    const memoryBudgetTokens = (() => {
+      const rc = parseObject(agent.runtimeConfig);
+      const mem = parseObject(rc.memory);
+      return asNumber(mem.budgetTokens, 2000);
+    })();
+    const recalledMemory = await agentMemorySvc.recallForHeartbeat(
+      agent.companyId,
+      agent.id,
+      issueContext?.projectId ?? null,
+      memoryBudgetTokens,
+    );
+    if (recalledMemory.recalledIds.length > 0) {
+      context.paperclipRecalledMemoryIds = recalledMemory.recalledIds;
+    }
+
     const buildHeartbeatContextLayers = (
       runtimeServicesForLayer: Array<{
         kind?: unknown;
@@ -2631,6 +2650,28 @@ export function heartbeatService(db: Db) {
             taskKey,
           },
         },
+        ...(recalledMemory.memories.length > 0
+          ? [
+              {
+                key: "agent_memory",
+                title: "Agent memory",
+                kind: "context",
+                summary: `${recalledMemory.memories.length} recalled artifact${recalledMemory.memories.length === 1 ? "" : "s"} (${recalledMemory.totalTokens}/${recalledMemory.budgetTokens} tokens)`,
+                metadata: {
+                  budgetTokens: recalledMemory.budgetTokens,
+                  totalTokens: recalledMemory.totalTokens,
+                  artifacts: recalledMemory.memories.map((m) => ({
+                    id: m.id,
+                    scope: m.scope,
+                    kind: m.kind,
+                    title: m.title,
+                    content: m.content,
+                    relevanceScore: m.relevanceScore,
+                  })),
+                },
+              },
+            ]
+          : []),
       ];
     };
     context.paperclipHeartbeatContext = {
