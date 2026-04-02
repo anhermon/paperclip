@@ -2809,14 +2809,11 @@ export function heartbeatService(db: Db) {
         ? createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id)
         : null;
       if (adapter.supportsLocalAgentJwt && !authToken) {
-        logger.warn(
-          {
-            companyId: agent.companyId,
-            agentId: agent.id,
-            runId: run.id,
-            adapterType: agent.adapterType,
-          },
-          "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
+        throw new Error(
+          `Cannot launch ${agent.adapterType} adapter for agent ${agent.id}: ` +
+          `local agent JWT secret is missing or invalid. ` +
+          `PAPERCLIP_API_KEY would not be injected, causing silent degradation. ` +
+          `Fix: ensure PAPERCLIP_AGENT_JWT_SECRET is set in server config.`,
         );
       }
       const adapterResult = await adapter.execute({
