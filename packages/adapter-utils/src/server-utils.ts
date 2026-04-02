@@ -157,6 +157,21 @@ export function appendWithCap(prev: string, chunk: string, cap = MAX_CAPTURE_BYT
   return combined.length > cap ? combined.slice(combined.length - cap) : combined;
 }
 
+/**
+ * Clamp an exit code to the PostgreSQL signed 32-bit integer range.
+ *
+ * On Windows, Node.js can report unsigned 32-bit exit codes (e.g. 4294967295
+ * for -1, or 3221225477 / 0xC0000005 for access-violation). PostgreSQL's
+ * `integer` type is signed 32-bit (-2147483648 to 2147483647), so we convert
+ * unsigned values to their signed two's-complement interpretation.
+ */
+export function clampExitCode(code: number | null): number | null {
+  if (code == null) return null;
+  // Convert to signed 32-bit via bitwise OR (handles the 0..4294967295 range)
+  const signed = code | 0;
+  return signed;
+}
+
 export function resolvePathValue(obj: Record<string, unknown>, dottedPath: string) {
   const parts = dottedPath.split(".");
   let cursor: unknown = obj;
@@ -238,6 +253,7 @@ export function buildPaperclipEnv(agent: { id: string; companyId: string }): Rec
   const vars: Record<string, string> = {
     PAPERCLIP_AGENT_ID: agent.id,
     PAPERCLIP_COMPANY_ID: agent.companyId,
+    PAPERCLIP_PLATFORM: process.platform,
   };
   const runtimeHost = resolveHostForUrl(
     process.env.PAPERCLIP_LISTEN_HOST ?? process.env.HOST ?? "localhost",
@@ -856,7 +872,7 @@ export async function runChildProcess(
           runningProcesses.delete(runId);
           void logChain.finally(() => {
             resolve({
-              exitCode: code,
+              exitCode: clampExitCode(code),
               signal,
               timedOut,
               stdout,

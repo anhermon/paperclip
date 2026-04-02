@@ -6,6 +6,7 @@ import {
   companies,
   createDb,
   executionWorkspaces,
+  heartbeatRuns,
   instanceSettings,
   issueComments,
   issueInboxArchives,
@@ -676,5 +677,152 @@ describeEmbeddedPostgres("issueService.create workspace inheritance", () => {
     expect(followUp.executionWorkspaceSettings).toEqual({
       mode: "operator_branch",
     });
+  });
+});
+
+describeEmbeddedPostgres("issueService stale run lock cleanup", () => {
+  let db!: ReturnType<typeof createDb>;
+  let svc!: ReturnType<typeof issueService>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issues-stale-locks-");
+    db = createDb(tempDb.connectionString);
+    svc = issueService(db);
+  }, 20_000);
+
+  afterEach(async () => {
+    await db.delete(issueComments);
+    await db.delete(issueInboxArchives);
+    await db.delete(activityLog);
+    await db.delete(issues);
+    await db.delete(heartbeatRuns);
+    await db.delete(executionWorkspaces);
+    await db.delete(projectWorkspaces);
+    await db.delete(projects);
+    await db.delete(agents);
+    await db.delete(instanceSettings);
+    await db.delete(companies);
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
+  });
+
+  it("cleans stale checkout and execution locks held by terminal runs", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const staleRunId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values({
+      id: staleRunId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "failed",
+      contextSnapshot: { issueId },
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Stale lock issue",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+      checkoutRunId: staleRunId,
+      executionRunId: staleRunId,
+      executionAgentNameKey: "codexcoder",
+      executionLockedAt: new Date("2026-04-01T00:00:00.000Z"),
+    });
+
+    const result = await svc.cleanupStaleRunLocks(companyId);
+
+    expect(result).toEqual({ checked: 1, cleaned: 1 });
+    const issue = await db.select().from(issues).where(eq(issues.id, issueId)).then((rows) => rows[0] ?? null);
+    expect(issue?.checkoutRunId).toBeNull();
+    expect(issue?.executionRunId).toBeNull();
+    expect(issue?.executionAgentNameKey).toBeNull();
+    expect(issue?.executionLockedAt).toBeNull();
+  });
+
+  it("allows checkout to recover when stale locks reference a terminated run", async () => {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const staleRunId = randomUUID();
+    const newRunId = randomUUID();
+    const issueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "active",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+    await db.insert(heartbeatRuns).values([
+      {
+        id: staleRunId,
+        companyId,
+        agentId,
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        status: "failed",
+        contextSnapshot: { issueId },
+      },
+      {
+        id: newRunId,
+        companyId,
+        agentId,
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        status: "running",
+        contextSnapshot: { issueId },
+      },
+    ]);
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Checkout recovery issue",
+      status: "todo",
+      priority: "medium",
+      checkoutRunId: staleRunId,
+      executionRunId: staleRunId,
+    });
+
+    const checkedOut = await svc.checkout(issueId, agentId, ["todo"], newRunId);
+
+    expect(checkedOut.assigneeAgentId).toBe(agentId);
+    expect(checkedOut.checkoutRunId).toBe(newRunId);
+    expect(checkedOut.executionRunId).toBe(newRunId);
+    expect(checkedOut.status).toBe("in_progress");
   });
 });

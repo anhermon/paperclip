@@ -25,6 +25,12 @@ afterEach(() => {
 });
 
 describe("buildPaperclipEnv", () => {
+  it("includes the runtime platform for adapter branching", () => {
+    const env = buildPaperclipEnv({ id: "agent-1", companyId: "company-1" });
+
+    expect(env.PAPERCLIP_PLATFORM).toBe(process.platform);
+  });
+
   it("prefers an explicit PAPERCLIP_API_URL", () => {
     process.env.PAPERCLIP_API_URL = "http://localhost:4100";
     process.env.PAPERCLIP_LISTEN_HOST = "127.0.0.1";

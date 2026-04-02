@@ -36,6 +36,15 @@ console.log(JSON.stringify({
   result: "ok",
 }));
 `;
+  if (process.platform === "win32" && commandPath.toLowerCase().endsWith(".cmd")) {
+    const scriptPath = `${commandPath}.js`;
+    const escapedScriptPath = scriptPath.replace(/\\/g, "\\\\");
+    const wrapper = `@echo off\r\nnode "${escapedScriptPath}" %*\r\n`;
+    await fs.writeFile(scriptPath, script, "utf8");
+    await fs.writeFile(commandPath, wrapper, "utf8");
+    return;
+  }
+
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
 }
@@ -53,17 +62,29 @@ async function createSkillDir(root: string, name: string) {
   return skillDir;
 }
 
+function setTestHome(root: string) {
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = root;
+  process.env.USERPROFILE = root;
+  return () => {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+  };
+}
+
 describe("cursor execute", () => {
   it("injects paperclip env vars and prompt note by default", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-execute-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "agent");
+    const commandPath = path.join(root, process.platform === "win32" ? "agent.cmd" : "agent");
     const capturePath = path.join(root, "capture.json");
     await fs.mkdir(workspace, { recursive: true });
     await writeFakeCursorCommand(commandPath);
 
-    const previousHome = process.env.HOME;
-    process.env.HOME = root;
+    const restoreHome = setTestHome(root);
 
     let invocationPrompt = "";
     try {
@@ -112,19 +133,20 @@ describe("cursor execute", () => {
           "PAPERCLIP_API_KEY",
           "PAPERCLIP_API_URL",
           "PAPERCLIP_COMPANY_ID",
+          "PAPERCLIP_PLATFORM",
           "PAPERCLIP_RUN_ID",
         ]),
       );
       expect(capture.prompt).toContain("Paperclip runtime note:");
+      expect(capture.prompt).toContain("PAPERCLIP_PLATFORM");
+      expect(capture.prompt).toContain("Use PAPERCLIP_PLATFORM=win32");
+      expect(capture.prompt).toContain("avoid /dev/stdin");
       expect(capture.prompt).toContain("PAPERCLIP_API_KEY");
       expect(invocationPrompt).toContain("Paperclip runtime note:");
       expect(invocationPrompt).toContain("PAPERCLIP_API_URL");
+      expect(invocationPrompt).toContain("Quote Windows paths correctly");
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
+      restoreHome();
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -132,13 +154,12 @@ describe("cursor execute", () => {
   it("passes --mode when explicitly configured", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-execute-mode-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "agent");
+    const commandPath = path.join(root, process.platform === "win32" ? "agent.cmd" : "agent");
     const capturePath = path.join(root, "capture.json");
     await fs.mkdir(workspace, { recursive: true });
     await writeFakeCursorCommand(commandPath);
 
-    const previousHome = process.env.HOME;
-    process.env.HOME = root;
+    const restoreHome = setTestHome(root);
 
     try {
       const result = await execute({
@@ -178,11 +199,7 @@ describe("cursor execute", () => {
       expect(capture.argv).toContain("--mode");
       expect(capture.argv).toContain("ask");
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
+      restoreHome();
       await fs.rm(root, { recursive: true, force: true });
     }
   });
@@ -190,7 +207,7 @@ describe("cursor execute", () => {
   it("injects company-library runtime skills into the Cursor skills home before execution", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-execute-runtime-skill-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "agent");
+    const commandPath = path.join(root, process.platform === "win32" ? "agent.cmd" : "agent");
     const runtimeSkillsRoot = path.join(root, "runtime-skills");
     await fs.mkdir(workspace, { recursive: true });
     await writeFakeCursorCommand(commandPath);
@@ -198,8 +215,7 @@ describe("cursor execute", () => {
     const paperclipDir = await createSkillDir(runtimeSkillsRoot, "paperclip");
     const asciiHeartDir = await createSkillDir(runtimeSkillsRoot, "ascii-heart");
 
-    const previousHome = process.env.HOME;
-    process.env.HOME = root;
+    const restoreHome = setTestHome(root);
 
     try {
       const result = await execute({
@@ -251,11 +267,7 @@ describe("cursor execute", () => {
         await fs.realpath(asciiHeartDir),
       );
     } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
+      restoreHome();
       await fs.rm(root, { recursive: true, force: true });
     }
   });

@@ -4,6 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import { execute } from "@paperclipai/adapter-claude-local/server";
 
+async function removeWithRetry(target: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EBUSY" || attempt === 4) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+}
+
 async function writeFakeClaudeCommand(commandPath: string): Promise<void> {
   const script = `#!/usr/bin/env node
 const fs = require("node:fs");
@@ -21,6 +35,15 @@ console.log(JSON.stringify({ type: "system", subtype: "init", session_id: "claud
 console.log(JSON.stringify({ type: "assistant", session_id: "claude-session-1", message: { content: [{ type: "text", text: "hello" }] } }));
 console.log(JSON.stringify({ type: "result", session_id: "claude-session-1", result: "hello", usage: { input_tokens: 1, cache_read_input_tokens: 0, output_tokens: 1 } }));
 `;
+  if (process.platform === "win32" && commandPath.toLowerCase().endsWith(".cmd")) {
+    const scriptPath = `${commandPath}.js`;
+    const escapedScriptPath = scriptPath.replace(/\\/g, "\\\\");
+    const wrapper = `@echo off\r\nnode "${escapedScriptPath}" %*\r\n`;
+    await fs.writeFile(scriptPath, script, "utf8");
+    await fs.writeFile(commandPath, wrapper, "utf8");
+    return;
+  }
+
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
 }
@@ -30,7 +53,7 @@ describe("claude execute", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-claude-execute-meta-"));
     const workspace = path.join(root, "workspace");
     const binDir = path.join(root, "bin");
-    const commandPath = path.join(binDir, "claude");
+    const commandPath = path.join(binDir, process.platform === "win32" ? "claude.cmd" : "claude");
     const capturePath = path.join(root, "capture.json");
     const claudeConfigDir = path.join(root, "claude-config");
     await fs.mkdir(workspace, { recursive: true });
@@ -47,6 +70,7 @@ describe("claude execute", () => {
 
     let loggedCommand: string | null = null;
     let loggedEnv: Record<string, string> = {};
+    let heartbeatLayers: Array<Record<string, unknown>> = [];
     try {
       const result = await execute({
         runId: "run-meta",
@@ -77,15 +101,38 @@ describe("claude execute", () => {
         onMeta: async (meta) => {
           loggedCommand = meta.command;
           loggedEnv = meta.env ?? {};
+          heartbeatLayers = Array.isArray(meta.heartbeatLayers)
+            ? (meta.heartbeatLayers as Array<Record<string, unknown>>)
+            : [];
         },
       });
 
       expect(result.exitCode).toBe(0);
       expect(result.errorMessage).toBeNull();
-      expect(loggedCommand).toBe(commandPath);
+      expect(loggedCommand?.toLowerCase()).toBe(commandPath.toLowerCase());
       expect(loggedEnv.HOME).toBe(root);
       expect(loggedEnv.CLAUDE_CONFIG_DIR).toBe(claudeConfigDir);
-      expect(loggedEnv.PAPERCLIP_RESOLVED_COMMAND).toBe(commandPath);
+      expect(loggedEnv.PAPERCLIP_RESOLVED_COMMAND?.toLowerCase()).toBe(commandPath.toLowerCase());
+      expect(heartbeatLayers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "bootstrap_prompt",
+            kind: "prompt",
+            includedInPrompt: false,
+          }),
+          expect.objectContaining({
+            key: "session_handoff",
+            kind: "prompt",
+            includedInPrompt: false,
+          }),
+          expect.objectContaining({
+            key: "heartbeat_prompt",
+            kind: "prompt",
+            includedInPrompt: true,
+            summary: "Heartbeat prompt included (31 chars)",
+          }),
+        ]),
+      );
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -93,7 +140,7 @@ describe("claude execute", () => {
       else process.env.PATH = previousPath;
       if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
       else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
-      await fs.rm(root, { recursive: true, force: true });
+      await removeWithRetry(root);
     }
   });
 });

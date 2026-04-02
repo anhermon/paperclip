@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { assembleHeartbeatInvocation } from "@paperclipai/adapter-utils";
 import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
 import {
   asString,
@@ -13,7 +14,6 @@ import {
   parseJson,
   buildPaperclipEnv,
   readPaperclipRuntimeSkillEntries,
-  joinPromptSections,
   buildInvocationEnvForLogs,
   ensureAbsoluteDirectory,
   ensureCommandResolvable,
@@ -404,17 +404,43 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? renderTemplate(bootstrapPromptTemplate, templateData).trim()
       : "";
   const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-  const prompt = joinPromptSections([
-    renderedBootstrapPrompt,
-    sessionHandoffNote,
-    renderedPrompt,
-  ]);
-  const promptMetrics = {
-    promptChars: prompt.length,
-    bootstrapPromptChars: renderedBootstrapPrompt.length,
-    sessionHandoffChars: sessionHandoffNote.length,
-    heartbeatPromptChars: renderedPrompt.length,
-  };
+  const instructionsLayer =
+    instructionsFilePath && effectiveInstructionsFilePath
+      ? {
+          key: "adapter_extras",
+          title: "Adapter-specific extras",
+          summary: "Agent instructions injected via --append-system-prompt-file",
+          metadata: {
+            instructionsFilePath,
+            injection: "append-system-prompt-file",
+          },
+        }
+      : null;
+  const assembledHeartbeat = assembleHeartbeatInvocation({
+    context,
+    promptFragments: [
+      {
+        key: "bootstrap_prompt",
+        title: "Bootstrap prompt",
+        text: renderedBootstrapPrompt,
+        metricKey: "bootstrapPromptChars",
+      },
+      {
+        key: "session_handoff",
+        title: "Session handoff",
+        text: sessionHandoffNote,
+        metricKey: "sessionHandoffChars",
+      },
+      {
+        key: "heartbeat_prompt",
+        title: "Heartbeat prompt",
+        text: renderedPrompt,
+        metricKey: "heartbeatPromptChars",
+      },
+    ],
+    adapterLayers: instructionsLayer ? [instructionsLayer] : [],
+  });
+  const { prompt, promptMetrics, heartbeatLayers } = assembledHeartbeat;
 
   const buildClaudeArgs = (resumeSessionId: string | null) => {
     const args = ["--print", "-", "--output-format", "stream-json", "--verbose"];
@@ -438,14 +464,26 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         .split(/\r?\n/)
         .map((line) => line.trim())
         .find(Boolean) ?? "";
+    const stdoutPreview = proc.stdout.trim().slice(0, 200);
 
     if ((proc.exitCode ?? 0) === 0) {
-      return "Failed to parse claude JSON output";
+      const hint = stdoutPreview
+        ? `Failed to parse claude JSON output (stdout preview: ${JSON.stringify(stdoutPreview)})`
+        : "Failed to parse claude JSON output (empty stdout)";
+      return hint;
     }
 
-    return stderrLine
-      ? `Claude exited with code ${proc.exitCode ?? -1}: ${stderrLine}`
-      : `Claude exited with code ${proc.exitCode ?? -1}`;
+    const codePart = `Claude exited with code ${proc.exitCode ?? -1}`;
+    if (stderrLine) return `${codePart}: ${stderrLine}`;
+    if (stdoutPreview) return `${codePart} (stdout preview: ${JSON.stringify(stdoutPreview.slice(0, 120))})`;
+    return codePart;
+  };
+
+  const classifyErrorCode = (proc: RunProcessResult, parsed: Record<string, unknown> | null, loginMeta: { requiresLogin: boolean }) => {
+    if (loginMeta.requiresLogin) return "claude_auth_required";
+    if (!parsed && proc.stdout.trim().length === 0 && (proc.exitCode ?? 0) !== 0) return "claude_crash_no_output";
+    if (!parsed) return "claude_json_parse_failed";
+    return null;
   };
 
   const runAttempt = async (resumeSessionId: string | null) => {
@@ -460,6 +498,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         env: loggedEnv,
         prompt,
         promptMetrics,
+        heartbeatLayers,
         context,
       });
     }
@@ -518,7 +557,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         signal: proc.signal,
         timedOut: false,
         errorMessage: parseFallbackErrorMessage(proc),
-        errorCode: loginMeta.requiresLogin ? "claude_auth_required" : null,
+        errorCode: classifyErrorCode(proc, parsed, loginMeta),
         errorMeta,
         resultJson: {
           stdout: proc.stdout,

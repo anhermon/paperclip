@@ -78,6 +78,18 @@ const SESSIONED_LOCAL_ADAPTERS = new Set([
   "pi_local",
 ]);
 
+function categorizeAdapterError(result: AdapterExecutionResult): string {
+  if (result.errorCode === "timeout") return "timeout";
+  if (result.errorCode === "cancelled") return "cancelled";
+  if (result.errorCode === "claude_auth_required") return "auth";
+  if (result.errorCode === "claude_crash_no_output") return "crash_no_output";
+  if (result.errorCode === "claude_json_parse_failed") return "json_parse_failed";
+  if (result.errorCode === "process_lost" || result.errorCode === "process_detached") return "process_lost";
+  if ((result.exitCode ?? 0) !== 0) return "nonzero_exit";
+  if (result.errorMessage) return "adapter_error";
+  return "unknown";
+}
+
 export function applyPersistedExecutionWorkspaceConfig(input: {
   config: Record<string, unknown>;
   workspaceConfig: ExecutionWorkspaceConfig | null;
@@ -1730,7 +1742,16 @@ export function heartbeatService(db: Db) {
       intervalSec: Math.max(0, asNumber(heartbeat.intervalSec, 0)),
       wakeOnDemand: asBoolean(heartbeat.wakeOnDemand ?? heartbeat.wakeOnAssignment ?? heartbeat.wakeOnOnDemand ?? heartbeat.wakeOnAutomation, true),
       maxConcurrentRuns: normalizeMaxConcurrentRuns(heartbeat.maxConcurrentRuns),
+      skipOnRateLimit: asBoolean(heartbeat.skipOnRateLimit, true),
+      skipOnEmptyInbox: asBoolean(heartbeat.skipOnEmptyInbox, true),
     };
+  }
+
+  const RATE_LIMIT_ERROR_RE = /rate.?limit|too many requests|429|quota.*exceeded|overloaded/i;
+
+  function isRateLimitedError(errorText: string | null | undefined): boolean {
+    if (!errorText) return false;
+    return RATE_LIMIT_ERROR_RE.test(errorText);
   }
 
   async function countRunningRunsForAgent(agentId: string) {
@@ -2089,6 +2110,8 @@ export function heartbeatService(db: Db) {
             id: issues.id,
             identifier: issues.identifier,
             title: issues.title,
+            status: issues.status,
+            priority: issues.priority,
             projectId: issues.projectId,
             projectWorkspaceId: issues.projectWorkspaceId,
             executionWorkspaceId: issues.executionWorkspaceId,
@@ -2101,6 +2124,7 @@ export function heartbeatService(db: Db) {
           .where(and(eq(issues.id, issueId), eq(issues.companyId, agent.companyId)))
           .then((rows) => rows[0] ?? null)
       : null;
+    const issueAncestors = issueId ? await issuesSvc.getAncestors(issueId) : [];
     const issueAssigneeOverrides =
       issueContext && issueContext.assigneeAgentId === agent.id
         ? parseIssueAssigneeAdapterOverrides(
@@ -2476,6 +2500,143 @@ export function heartbeatService(db: Db) {
       sessionDisplayId: previousSessionDisplayId,
       taskKey,
     };
+    const buildHeartbeatContextLayers = (
+      runtimeServicesForLayer: Array<{
+        kind?: unknown;
+        name?: unknown;
+        url?: unknown;
+        reused?: unknown;
+      }>,
+    ) => {
+      const activeSessionId = runtimeForAdapter.sessionDisplayId ?? runtimeForAdapter.sessionId;
+      const runtimeServicePrimaryUrl =
+        readNonEmptyString(context.paperclipRuntimePrimaryUrl) ??
+        runtimeServicesForLayer
+          .map((service) => readNonEmptyString(service.url))
+          .find((value): value is string => Boolean(value)) ??
+        null;
+      const taskSummary = issueContext
+        ? `${issueContext.identifier}: ${issueContext.title}`
+        : taskKey
+          ? `Task ${taskKey}`
+          : `Wake ${readNonEmptyString(context.wakeReason) ?? "manual"}`;
+
+      return [
+        {
+          key: "identity",
+          title: "Identity",
+          kind: "context",
+          summary: `${agent.name} (${agent.adapterType})`,
+          metadata: {
+            agentId: agent.id,
+            companyId: agent.companyId,
+            runId: run.id,
+          },
+        },
+        {
+          key: "task_context",
+          title: "Task context",
+          kind: "context",
+          summary: taskSummary,
+          metadata: {
+            issueId: issueContext?.id ?? null,
+            identifier: issueContext?.identifier ?? null,
+            title: issueContext?.title ?? null,
+            status: issueContext?.status ?? null,
+            priority: issueContext?.priority ?? null,
+            wakeReason: readNonEmptyString(context.wakeReason),
+            wakeSource: readNonEmptyString(context.wakeSource),
+          },
+        },
+        {
+          key: "ancestor_summaries",
+          title: "Ancestor summaries",
+          kind: "context",
+          summary:
+            issueAncestors.length > 0
+              ? `${issueAncestors.length} ancestor summary${issueAncestors.length === 1 ? "" : "ies"}`
+              : "No ancestor summaries",
+          metadata: {
+            ancestors: issueAncestors.map((ancestor) => ({
+              identifier: ancestor.identifier,
+              title: ancestor.title,
+              status: ancestor.status,
+              priority: ancestor.priority,
+            })),
+          },
+        },
+        {
+          key: "workspace_state",
+          title: "Workspace state",
+          kind: "context",
+          summary: `${effectiveExecutionWorkspaceMode} workspace at ${executionWorkspace.cwd}`,
+          metadata: {
+            mode: effectiveExecutionWorkspaceMode,
+            source: executionWorkspace.source,
+            strategy: executionWorkspace.strategy,
+            cwd: executionWorkspace.cwd,
+            branchName: executionWorkspace.branchName,
+            repoUrl: executionWorkspace.repoUrl,
+            repoRef: executionWorkspace.repoRef,
+            warnings: runtimeWorkspaceWarnings,
+          },
+        },
+        {
+          key: "runtime_services",
+          title: "Runtime services",
+          kind: "context",
+          summary:
+            runtimeServicesForLayer.length > 0
+              ? `${runtimeServicesForLayer.length} runtime service${runtimeServicesForLayer.length === 1 ? "" : "s"}`
+              : runtimeServiceIntents.length > 0
+                ? `${runtimeServiceIntents.length} runtime service intent${runtimeServiceIntents.length === 1 ? "" : "s"}`
+                : "No runtime services",
+          metadata: {
+            primaryUrl: runtimeServicePrimaryUrl,
+            intents: runtimeServiceIntents,
+            services: runtimeServicesForLayer.map((service) => ({
+              kind: readNonEmptyString(service.kind),
+              name: readNonEmptyString(service.name),
+              url: readNonEmptyString(service.url),
+              reused: service.reused === true,
+            })),
+          },
+        },
+        {
+          key: "skills",
+          title: "Skills",
+          kind: "context",
+          summary: `${runtimeSkillEntries.length} runtime skill${runtimeSkillEntries.length === 1 ? "" : "s"}`,
+          metadata: {
+            skills: runtimeSkillEntries.map((entry) => ({
+              key: entry.key,
+              runtimeName: entry.runtimeName,
+            })),
+          },
+        },
+        {
+          key: "session_handoff",
+          title: "Session handoff",
+          kind: "context",
+          summary: sessionCompaction.rotate
+            ? (sessionCompaction.reason ?? "Fresh session forced after compaction")
+            : activeSessionId
+              ? `Resuming session ${activeSessionId}`
+              : "Fresh session",
+          metadata: {
+            rotated: sessionCompaction.rotate,
+            reason: sessionCompaction.reason,
+            previousSessionId: readNonEmptyString(context.paperclipPreviousSessionId),
+            sessionId: activeSessionId,
+            taskKey,
+          },
+        },
+      ];
+    };
+    context.paperclipHeartbeatContext = {
+      version: 1,
+      layers: buildHeartbeatContextLayers([]),
+    };
 
     let seq = 1;
     let handle: RunLogHandle | null = null;
@@ -2599,6 +2760,10 @@ export function heartbeatService(db: Db) {
         context.paperclipRuntimeServices = runtimeServices;
         context.paperclipRuntimePrimaryUrl =
           runtimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+        context.paperclipHeartbeatContext = {
+          version: 1,
+          layers: buildHeartbeatContextLayers(runtimeServices),
+        };
         await db
           .update(heartbeatRuns)
           .set({
@@ -2690,6 +2855,10 @@ export function heartbeatService(db: Db) {
         context.paperclipRuntimeServices = combinedRuntimeServices;
         context.paperclipRuntimePrimaryUrl =
           combinedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+        context.paperclipHeartbeatContext = {
+          version: 1,
+          layers: buildHeartbeatContextLayers(combinedRuntimeServices),
+        };
         await db
           .update(heartbeatRuns)
           .set({
@@ -2827,6 +2996,9 @@ export function heartbeatService(db: Db) {
           payload: {
             status,
             exitCode: adapterResult.exitCode,
+            ...(adapterResult.signal ? { signal: adapterResult.signal } : {}),
+            ...(adapterResult.errorCode ? { errorCode: adapterResult.errorCode } : {}),
+            ...(adapterResult.errorMessage ? { errorCategory: categorizeAdapterError(adapterResult) } : {}),
           },
         });
         await releaseIssueExecutionAndPromote(finalizedRun);
@@ -2978,12 +3150,23 @@ export function heartbeatService(db: Db) {
       await tx
         .update(issues)
         .set({
+          checkoutRunId: null,
           executionRunId: null,
           executionAgentNameKey: null,
           executionLockedAt: null,
           updatedAt: new Date(),
         })
-        .where(eq(issues.id, issue.id));
+        .where(and(eq(issues.id, issue.id), eq(issues.checkoutRunId, run.id), eq(issues.executionRunId, run.id)));
+
+      await tx
+        .update(issues)
+        .set({
+          executionRunId: null,
+          executionAgentNameKey: null,
+          executionLockedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(issues.id, issue.id), eq(issues.executionRunId, run.id)));
 
       while (true) {
         const deferred = await tx
@@ -3209,6 +3392,37 @@ export function heartbeatService(db: Db) {
     if (source !== "timer" && !policy.wakeOnDemand) {
       await writeSkippedRequest("heartbeat.wakeOnDemand.disabled");
       return null;
+    }
+
+    // --- Pre-flight gating for timer-based wakes (ANGA-136) ---
+    if (source === "timer") {
+      // Gate 1: Rate-limit detection — skip if last run was rate-limited
+      if (policy.skipOnRateLimit) {
+        const runtimeState = await getRuntimeState(agentId);
+        if (runtimeState && isRateLimitedError(runtimeState.lastError)) {
+          await writeSkippedRequest("heartbeat.rate_limited");
+          return null;
+        }
+      }
+
+      // Gate 2: Empty inbox — skip timer wakes when agent has no assigned work
+      if (policy.skipOnEmptyInbox && !issueId) {
+        const assignedCount = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(issues)
+          .where(
+            and(
+              eq(issues.companyId, agent.companyId),
+              eq(issues.assigneeAgentId, agentId),
+              inArray(issues.status, ["todo", "in_progress", "blocked"]),
+            ),
+          )
+          .then((rows) => Number(rows[0]?.count ?? 0));
+        if (assignedCount === 0) {
+          await writeSkippedRequest("heartbeat.empty_inbox");
+          return null;
+        }
+      }
     }
 
     const bypassIssueExecutionLock =
@@ -3961,20 +4175,25 @@ export function heartbeatService(db: Db) {
         const elapsedMs = now.getTime() - baseline;
         if (elapsedMs < policy.intervalSec * 1000) continue;
 
-        const run = await enqueueWakeup(agent.id, {
-          source: "timer",
-          triggerDetail: "system",
-          reason: "heartbeat_timer",
-          requestedByActorType: "system",
-          requestedByActorId: "heartbeat_scheduler",
-          contextSnapshot: {
-            source: "scheduler",
-            reason: "interval_elapsed",
-            now: now.toISOString(),
-          },
-        });
-        if (run) enqueued += 1;
-        else skipped += 1;
+        try {
+          const run = await enqueueWakeup(agent.id, {
+            source: "timer",
+            triggerDetail: "system",
+            reason: "heartbeat_timer",
+            requestedByActorType: "system",
+            requestedByActorId: "heartbeat_scheduler",
+            contextSnapshot: {
+              source: "scheduler",
+              reason: "interval_elapsed",
+              now: now.toISOString(),
+            },
+          });
+          if (run) enqueued += 1;
+          else skipped += 1;
+        } catch {
+          // Budget block, agent not invokable, or other conflict — skip and continue
+          skipped += 1;
+        }
       }
 
       return { checked, enqueued, skipped };

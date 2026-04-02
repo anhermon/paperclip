@@ -236,6 +236,21 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(issue?.checkoutRunId).toBe(runId);
   });
 
+  it("releases checkout and execution locks when a running issue is cancelled", async () => {
+    const { runId, issueId } = await seedRunFixture();
+    const heartbeat = heartbeatService(db);
+
+    await heartbeat.cancelRun(runId);
+
+    const issue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(issue?.executionRunId).toBeNull();
+    expect(issue?.checkoutRunId).toBeNull();
+  });
+
   it("clears the detached warning when the run reports activity again", async () => {
     const { runId } = await seedRunFixture({
       includeIssue: false,

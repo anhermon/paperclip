@@ -100,6 +100,16 @@ export interface AdapterSessionCodec {
   getDisplayId?: (params: Record<string, unknown> | null) => string | null;
 }
 
+export interface AdapterInvocationLayer {
+  key: string;
+  title: string;
+  kind: "context" | "prompt" | "adapter";
+  summary?: string | null;
+  chars?: number;
+  includedInPrompt?: boolean;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface AdapterInvocationMeta {
   adapterType: string;
   command: string;
@@ -109,6 +119,7 @@ export interface AdapterInvocationMeta {
   env?: Record<string, string>;
   prompt?: string;
   promptMetrics?: Record<string, number>;
+  heartbeatLayers?: AdapterInvocationLayer[];
   context?: Record<string, unknown>;
 }
 

@@ -24,6 +24,7 @@ Every agent has environment variables injected at runtime:
 | `PAPERCLIP_COMPANY_ID` | The company the agent belongs to |
 | `PAPERCLIP_API_URL` | Base URL for the Paperclip API |
 | `PAPERCLIP_API_KEY` | Short-lived JWT for API authentication |
+| `PAPERCLIP_PLATFORM` | Host OS platform (`win32`, `linux`, or `darwin`) |
 | `PAPERCLIP_RUN_ID` | Current heartbeat run ID |
 
 Additional context variables are set when the wake has a specific trigger:
@@ -35,6 +36,14 @@ Additional context variables are set when the wake has a specific trigger:
 | `PAPERCLIP_WAKE_COMMENT_ID` | Specific comment that triggered this wake |
 | `PAPERCLIP_APPROVAL_ID` | Approval that was resolved |
 | `PAPERCLIP_APPROVAL_STATUS` | Approval decision (`approved`, `rejected`) |
+
+## Shell Portability
+
+Agents should branch on `PAPERCLIP_PLATFORM` before assuming Unix shell behavior.
+
+- On Windows (`win32`), avoid `/dev/stdin`.
+- Prefer PowerShell-safe or file-based flows over inline Python heredoc assumptions.
+- Quote Windows paths carefully when they may contain spaces.
 
 ## Session Persistence
 

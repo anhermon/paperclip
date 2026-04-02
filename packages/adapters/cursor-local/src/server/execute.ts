@@ -85,6 +85,9 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
     "Paperclip runtime note:",
     `The following PAPERCLIP_* environment variables are available in this run: ${paperclipKeys.join(", ")}`,
     "Do not assume these variables are missing without checking your shell environment.",
+    "Use PAPERCLIP_PLATFORM=win32 to decide whether Windows-safe shell handling is required.",
+    "On Windows, avoid /dev/stdin and prefer PowerShell-safe or file-based flows over inline Python heredoc assumptions.",
+    "Quote Windows paths correctly when they may contain spaces.",
     "",
     "",
   ].join("\n");

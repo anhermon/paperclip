@@ -29,6 +29,7 @@ import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
 import { heartbeatService, reconcilePersistedRuntimeServicesOnStartup, routineService } from "./services/index.js";
+import { issueService } from "./services/issues.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
@@ -564,13 +565,20 @@ export async function startServer(): Promise<StartedServer> {
   
   if (config.heartbeatSchedulerEnabled) {
     const heartbeat = heartbeatService(db as any);
+    const issuesSvc = issueService(db as any);
     const routines = routineService(db as any);
   
     // Reap orphaned running runs at startup while in-memory execution state is empty,
     // then resume any persisted queued runs that were waiting on the previous process.
     void heartbeat
       .reapOrphanedRuns()
-      .then(() => heartbeat.resumeQueuedRuns())
+      .then(async () => {
+        const cleaned = await issuesSvc.cleanupStaleRunLocks();
+        if (cleaned.cleaned > 0) {
+          logger.warn({ ...cleaned }, "cleaned stale issue run locks during startup recovery");
+        }
+        return heartbeat.resumeQueuedRuns();
+      })
       .catch((err) => {
         logger.error({ err }, "startup heartbeat recovery failed");
       });
@@ -601,7 +609,13 @@ export async function startServer(): Promise<StartedServer> {
       // persisted queued work is still being driven forward.
       void heartbeat
         .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
-        .then(() => heartbeat.resumeQueuedRuns())
+        .then(async () => {
+          const cleaned = await issuesSvc.cleanupStaleRunLocks();
+          if (cleaned.cleaned > 0) {
+            logger.warn({ ...cleaned }, "cleaned stale issue run locks during periodic recovery");
+          }
+          return heartbeat.resumeQueuedRuns();
+        })
         .catch((err) => {
           logger.error({ err }, "periodic heartbeat recovery failed");
         });

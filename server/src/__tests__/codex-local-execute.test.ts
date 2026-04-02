@@ -24,6 +24,15 @@ console.log(JSON.stringify({ type: "thread.started", thread_id: "codex-session-1
 console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hello" } }));
 console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } }));
 `;
+  if (process.platform === "win32" && commandPath.toLowerCase().endsWith(".cmd")) {
+    const scriptPath = `${commandPath}.js`;
+    const escapedScriptPath = scriptPath.replace(/\\/g, "\\\\");
+    const wrapper = `@echo off\r\nnode "${escapedScriptPath}" %*\r\n`;
+    await fs.writeFile(scriptPath, script, "utf8");
+    await fs.writeFile(commandPath, wrapper, "utf8");
+    return;
+  }
+
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
 }
@@ -41,10 +50,12 @@ type LogEntry = {
 };
 
 describe("codex execute", () => {
+  const heartbeatPrompt = "Follow the paperclip heartbeat.";
+
   it("uses a Paperclip-managed CODEX_HOME outside worktree mode while preserving shared auth and config", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-default-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "codex");
+    const commandPath = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
     const capturePath = path.join(root, "capture.json");
     const sharedCodexHome = path.join(root, "shared-codex-home");
     const paperclipHome = path.join(root, "paperclip-home");
@@ -142,7 +153,7 @@ describe("codex execute", () => {
   it("emits a command note that Codex auto-applies repo-scoped AGENTS.md files", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-notes-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "codex");
+    const commandPath = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
     const capturePath = path.join(root, "capture.json");
     await fs.mkdir(workspace, { recursive: true });
     await writeFakeCodexCommand(commandPath);
@@ -195,11 +206,112 @@ describe("codex execute", () => {
     }
   });
 
+  it("emits layered heartbeat metadata for Codex invocations", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-layers-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
+    const capturePath = path.join(root, "capture.json");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFakeCodexCommand(commandPath);
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    let heartbeatLayers: Array<Record<string, unknown>> = [];
+    let promptMetrics: Record<string, number> = {};
+    try {
+      const result = await execute({
+        runId: "run-layers",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: {
+            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+          },
+          promptTemplate: heartbeatPrompt,
+        },
+        context: {
+          paperclipHeartbeatContext: {
+            version: 1,
+            layers: [
+              {
+                key: "identity",
+                title: "Identity",
+                kind: "context",
+                summary: "Codex Coder (codex_local)",
+              },
+            ],
+          },
+        },
+        authToken: "run-jwt-token",
+        onLog: async () => {},
+        onMeta: async (meta) => {
+          heartbeatLayers = Array.isArray(meta.heartbeatLayers)
+            ? (meta.heartbeatLayers as Array<Record<string, unknown>>)
+            : [];
+          promptMetrics = meta.promptMetrics ?? {};
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+      expect(promptMetrics).toEqual({
+        bootstrapPromptChars: 0,
+        sessionHandoffChars: 0,
+        heartbeatPromptChars: heartbeatPrompt.length,
+        instructionsChars: 0,
+        promptChars: heartbeatPrompt.length,
+      });
+      expect(heartbeatLayers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: "identity",
+            kind: "context",
+            summary: "Codex Coder (codex_local)",
+          }),
+          expect.objectContaining({
+            key: "bootstrap_prompt",
+            kind: "prompt",
+            includedInPrompt: false,
+          }),
+          expect.objectContaining({
+            key: "session_handoff",
+            kind: "prompt",
+            includedInPrompt: false,
+          }),
+          expect.objectContaining({
+            key: "heartbeat_prompt",
+            kind: "prompt",
+            includedInPrompt: true,
+            summary: "Heartbeat prompt included (31 chars)",
+          }),
+        ]),
+      );
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("logs HOME and the resolved executable path in invocation metadata", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-meta-"));
     const workspace = path.join(root, "workspace");
     const binDir = path.join(root, "bin");
-    const commandPath = path.join(binDir, "codex");
+    const commandPath = path.join(binDir, process.platform === "win32" ? "codex.cmd" : "codex");
     const capturePath = path.join(root, "capture.json");
     await fs.mkdir(workspace, { recursive: true });
     await fs.mkdir(binDir, { recursive: true });
@@ -247,9 +359,9 @@ describe("codex execute", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.errorMessage).toBeNull();
-      expect(loggedCommand).toBe(commandPath);
+      expect(loggedCommand?.toLowerCase()).toBe(commandPath.toLowerCase());
       expect(loggedEnv.HOME).toBe(root);
-      expect(loggedEnv.PAPERCLIP_RESOLVED_COMMAND).toBe(commandPath);
+      expect(loggedEnv.PAPERCLIP_RESOLVED_COMMAND?.toLowerCase()).toBe(commandPath.toLowerCase());
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -262,7 +374,7 @@ describe("codex execute", () => {
   it("uses a worktree-isolated CODEX_HOME while preserving shared auth and config", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "codex");
+    const commandPath = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
     const capturePath = path.join(root, "capture.json");
     const sharedCodexHome = path.join(root, "shared-codex-home");
     const paperclipHome = path.join(root, "paperclip-home");
@@ -337,6 +449,7 @@ describe("codex execute", () => {
           "PAPERCLIP_API_KEY",
           "PAPERCLIP_API_URL",
           "PAPERCLIP_COMPANY_ID",
+          "PAPERCLIP_PLATFORM",
           "PAPERCLIP_RUN_ID",
         ]),
       );
@@ -379,7 +492,7 @@ describe("codex execute", () => {
   it("respects an explicit CODEX_HOME config override even in worktree mode", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-explicit-"));
     const workspace = path.join(root, "workspace");
-    const commandPath = path.join(root, "codex");
+    const commandPath = path.join(root, process.platform === "win32" ? "codex.cmd" : "codex");
     const capturePath = path.join(root, "capture.json");
     const sharedCodexHome = path.join(root, "shared-codex-home");
     const explicitCodexHome = path.join(root, "explicit-codex-home");

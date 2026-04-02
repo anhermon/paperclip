@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import {
+  assembleHeartbeatInvocation,
+  inferOpenAiCompatibleBiller,
+  type AdapterExecutionContext,
+  type AdapterExecutionResult,
+} from "@paperclipai/adapter-utils";
 import {
   asString,
   asNumber,
@@ -18,7 +23,6 @@ import {
   resolveCommandForLogs,
   resolvePaperclipDesiredSkillNames,
   renderTemplate,
-  joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
@@ -466,19 +470,69 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? renderTemplate(bootstrapPromptTemplate, templateData).trim()
       : "";
   const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-  const prompt = joinPromptSections([
-    instructionsPrefix,
-    renderedBootstrapPrompt,
-    sessionHandoffNote,
-    renderedPrompt,
-  ]);
+  const instructionsLayer =
+    instructionsFilePath && instructionsPrefix.length > 0
+      ? {
+          key: "adapter_extras",
+          title: "Adapter-specific extras",
+          summary: "Agent instructions prepended to Codex stdin prompt",
+          chars: instructionsChars,
+          includedInPrompt: true,
+          metadata: {
+            instructionsFilePath,
+            injection: "stdin-prefix",
+          },
+        }
+      : null;
+  const assembledHeartbeat = assembleHeartbeatInvocation({
+    context,
+    promptFragments: [
+      {
+        key: "bootstrap_prompt",
+        title: "Bootstrap prompt",
+        text: renderedBootstrapPrompt,
+        metricKey: "bootstrapPromptChars",
+      },
+      {
+        key: "session_handoff",
+        title: "Session handoff",
+        text: sessionHandoffNote,
+        metricKey: "sessionHandoffChars",
+      },
+      {
+        key: "heartbeat_prompt",
+        title: "Heartbeat prompt",
+        text: renderedPrompt,
+        metricKey: "heartbeatPromptChars",
+      },
+    ],
+    adapterLayers: instructionsLayer ? [instructionsLayer] : [],
+  });
+  const prompt = instructionsPrefix
+    ? [instructionsPrefix, assembledHeartbeat.prompt].filter(Boolean).join("\n\n")
+    : assembledHeartbeat.prompt;
   const promptMetrics = {
-    promptChars: prompt.length,
+    ...assembledHeartbeat.promptMetrics,
     instructionsChars,
-    bootstrapPromptChars: renderedBootstrapPrompt.length,
-    sessionHandoffChars: sessionHandoffNote.length,
-    heartbeatPromptChars: renderedPrompt.length,
+    promptChars: prompt.length,
   };
+  const heartbeatLayers =
+    instructionsLayer && instructionsPrefix.length > 0
+      ? [
+          {
+            key: "instructions_prefix",
+            title: "Instructions prefix",
+            kind: "prompt" as const,
+            summary: `Instructions prefix included (${instructionsChars} chars)`,
+            chars: instructionsChars,
+            includedInPrompt: true,
+            metadata: {
+              instructionsFilePath,
+            },
+          },
+          ...assembledHeartbeat.heartbeatLayers,
+        ]
+      : assembledHeartbeat.heartbeatLayers;
 
   const buildArgs = (resumeSessionId: string | null) => {
     const args = ["exec", "--json"];
@@ -507,6 +561,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         env: loggedEnv,
         prompt,
         promptMetrics,
+        heartbeatLayers,
         context,
       });
     }
