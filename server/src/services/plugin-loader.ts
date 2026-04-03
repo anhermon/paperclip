@@ -927,7 +927,8 @@ export function pluginLoader(
 
     try {
       // Dynamic import works for both .js (ESM) and .cjs (CJS) manifests.
-      // On Windows, absolute paths must be file:// URLs for the ESM loader.
+      // Convert to a file:// URL so the ESM loader accepts absolute paths on
+      // all platforms (required on Windows; harmless no-op on POSIX).
       const mod = await import(pathToFileURL(manifestPath).href) as Record<string, unknown>;
       // The manifest may be the default export or the module itself
       raw = mod["default"] ?? mod;
