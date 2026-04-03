@@ -2,6 +2,7 @@ import type { UsageSummary } from "@paperclipai/adapter-utils";
 import { asString, asNumber, parseObject, parseJson } from "@paperclipai/adapter-utils/server-utils";
 
 const CLAUDE_AUTH_REQUIRED_RE = /(?:not\s+logged\s+in|please\s+log\s+in|please\s+run\s+`?claude\s+login`?|login\s+required|requires\s+login|unauthorized|authentication\s+required)/i;
+const CLAUDE_RATE_LIMITED_RE = /(?:rate.limit|overloaded|too\s+many\s+requests|\b429\b|usage\s+limit|quota\s+exceeded|usage_limit_reached)/i;
 const URL_RE = /(https?:\/\/[^\s'"`<>()[\]{};,!?]+[^\s'"`<>()[\]{};,!.?:]+)/gi;
 
 export function parseClaudeStreamJson(stdout: string) {
@@ -165,6 +166,25 @@ export function isClaudeMaxTurnsResult(parsed: Record<string, unknown> | null | 
 
   const resultText = asString(parsed.result, "").trim();
   return /max(?:imum)?\s+turns?/i.test(resultText);
+}
+
+export function detectClaudeRateLimited(input: {
+  parsed: Record<string, unknown> | null;
+  stdout: string;
+  stderr: string;
+}): { rateLimited: boolean } {
+  const messages = [
+    asString(input.parsed?.result, ""),
+    ...extractClaudeErrorMessages(input.parsed ?? {}),
+    input.stdout,
+    input.stderr,
+  ]
+    .join("\n")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return { rateLimited: messages.some((line) => CLAUDE_RATE_LIMITED_RE.test(line)) };
 }
 
 export function isClaudeUnknownSessionError(parsed: Record<string, unknown>): boolean {

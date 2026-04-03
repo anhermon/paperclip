@@ -28,6 +28,7 @@ import { DEFAULT_GEMINI_LOCAL_MODEL } from "../index.js";
 import {
   describeGeminiFailure,
   detectGeminiAuthRequired,
+  detectGeminiQuotaExhausted,
   isGeminiTurnLimitResult,
   isGeminiUnknownSessionError,
   parseGeminiJsonl,
