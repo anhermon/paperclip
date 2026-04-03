@@ -11,7 +11,7 @@ type Approval = {
   type: string;
   status: string;
   payload: Record<string, unknown>;
-  requestedAt: string;
+  createdAt: string;
   requestedByAgentId: string | null;
 };
 

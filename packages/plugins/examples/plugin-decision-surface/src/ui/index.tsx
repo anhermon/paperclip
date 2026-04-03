@@ -7,7 +7,7 @@ import { DATA_KEYS, TOOL_NAMES } from "../constants.js";
 // ---------------------------------------------------------------------------
 
 type DecisionItem =
-  | { kind: "approval"; companyId: string; data: { id: string; type: string; payload: Record<string, unknown>; requestedAt: string } }
+  | { kind: "approval"; companyId: string; data: { id: string; type: string; payload: Record<string, unknown>; createdAt: string } }
   | { kind: "blocked_issue"; companyId: string; data: { id: string; identifier: string; title: string; updatedAt: string } };
 
 type QueueData = {
@@ -28,7 +28,7 @@ function ApprovalRow({ item }: { item: Extract<DecisionItem, { kind: "approval" 
       <strong>Approval</strong> — {item.data.type}
       <div style={{ color: "#555", fontSize: 13, marginTop: 2 }}>{plan.slice(0, 120)}{plan.length > 120 ? "…" : ""}</div>
       <div style={{ color: "#888", fontSize: 11, marginTop: 2 }}>
-        {new Date(item.data.requestedAt).toLocaleString()}
+        {new Date(item.data.createdAt).toLocaleString()}
       </div>
     </li>
   );
