@@ -523,7 +523,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         ? "auth_required"
         : rateMeta.rateLimited
           ? "rate_limited"
-          : "startup_failure";
+          : "startup_failed";
       return {
         exitCode: proc.exitCode,
         signal: proc.signal,
