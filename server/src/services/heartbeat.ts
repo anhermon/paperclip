@@ -1942,6 +1942,42 @@ export function heartbeatService(db: Db) {
     return { reaped: reaped.length, runIds: reaped };
   }
 
+  /**
+   * Safety-net reaper: finds issues whose executionRunId or checkoutRunId points to a
+   * run in a terminal state (succeeded/failed/cancelled/timed_out) and nulls out both
+   * lock columns.  This handles any edge case where releaseIssueExecutionAndPromote was
+   * skipped (e.g. a crash between setRunStatus and the release call).
+   */
+  async function reapStaleIssueLocks() {
+    const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"];
+
+    const staleByExecution = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .innerJoin(heartbeatRuns, eq(issues.executionRunId, heartbeatRuns.id))
+      .where(inArray(heartbeatRuns.status, TERMINAL_STATUSES));
+
+    const staleByCheckout = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .innerJoin(heartbeatRuns, eq(issues.checkoutRunId, heartbeatRuns.id))
+      .where(inArray(heartbeatRuns.status, TERMINAL_STATUSES));
+
+    const staleIds = [
+      ...new Set([...staleByExecution, ...staleByCheckout].map((r) => r.id)),
+    ];
+
+    if (staleIds.length === 0) return { reaped: 0, issueIds: [] };
+
+    await db
+      .update(issues)
+      .set({ executionRunId: null, checkoutRunId: null, executionAgentNameKey: null, executionLockedAt: null, updatedAt: new Date() })
+      .where(inArray(issues.id, staleIds));
+
+    logger.warn({ reapedCount: staleIds.length, issueIds: staleIds }, "reaped stale issue execution/checkout locks");
+    return { reaped: staleIds.length, issueIds: staleIds };
+  }
+
   async function resumeQueuedRuns() {
     const queuedRuns = await db
       .select({ agentId: heartbeatRuns.agentId })
@@ -2979,6 +3015,7 @@ export function heartbeatService(db: Db) {
         .update(issues)
         .set({
           executionRunId: null,
+          checkoutRunId: null,
           executionAgentNameKey: null,
           executionLockedAt: null,
           updatedAt: new Date(),
@@ -3942,6 +3979,8 @@ export function heartbeatService(db: Db) {
     reportRunActivity: clearDetachedRunWarning,
 
     reapOrphanedRuns,
+
+    reapStaleIssueLocks,
 
     resumeQueuedRuns,
 
