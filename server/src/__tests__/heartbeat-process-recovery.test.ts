@@ -206,7 +206,9 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       .where(eq(issues.id, issueId))
       .then((rows) => rows[0] ?? null);
     expect(issue?.executionRunId).toBe(retryRun?.id ?? null);
-    expect(issue?.checkoutRunId).toBe(runId);
+    // checkoutRunId must also transfer to the retry run so that reapStaleIssueLocks
+    // does not see the old failed run and incorrectly clear the live retry lock.
+    expect(issue?.checkoutRunId).toBe(retryRun?.id ?? null);
   });
 
   it("does not queue a second retry after the first process-loss retry was already used", async () => {
@@ -233,7 +235,8 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       .where(eq(issues.id, issueId))
       .then((rows) => rows[0] ?? null);
     expect(issue?.executionRunId).toBeNull();
-    expect(issue?.checkoutRunId).toBe(runId);
+    // releaseIssueExecutionAndPromote clears both lock columns
+    expect(issue?.checkoutRunId).toBeNull();
   });
 
   it("clears the detached warning when the run reports activity again", async () => {
@@ -251,5 +254,42 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     const run = await heartbeat.getRun(runId);
     expect(run?.errorCode).toBeNull();
     expect(run?.error).toBeNull();
+  });
+
+  it("reapStaleIssueLocks does not clear a live retry lock after process_lost", async () => {
+    // Simulate the state after enqueueProcessLossRetry has run:
+    // - originalRun: status="failed", errorCode="process_lost"
+    // - retryRun: status="queued"
+    // - issue: executionRunId=retryRun, checkoutRunId=retryRun (both transferred)
+    // reapStaleIssueLocks must NOT clear the issue lock.
+    const { companyId, agentId, issueId } = await seedRunFixture({
+      processPid: 999_999_999,
+    });
+    const heartbeat = heartbeatService(db);
+
+    // Run the reaper to produce the process_lost + retry state
+    await heartbeat.reapOrphanedRuns();
+
+    const issueAfterReap = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+
+    // Both lock columns should now point to the live retry run (not the failed run)
+    expect(issueAfterReap?.executionRunId).not.toBeNull();
+    expect(issueAfterReap?.checkoutRunId).toBe(issueAfterReap?.executionRunId);
+
+    // Now run the stale-lock safety net — it must NOT clear the live retry lock
+    const reapResult = await heartbeat.reapStaleIssueLocks();
+    expect(reapResult.reaped).toBe(0);
+
+    const issueAfterSafetyNet = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(issueAfterSafetyNet?.executionRunId).not.toBeNull();
+    expect(issueAfterSafetyNet?.checkoutRunId).not.toBeNull();
   });
 });

@@ -1686,6 +1686,10 @@ export function heartbeatService(db: Db) {
           .update(issues)
           .set({
             executionRunId: retryRun.id,
+            // Also transfer checkoutRunId to the retry run so that reapStaleIssueLocks does
+            // not treat the issue as stale (old run.id → "failed") and prematurely clear the
+            // live retry lock.
+            checkoutRunId: retryRun.id,
             executionAgentNameKey: normalizeAgentNameKey(agent.name),
             executionLockedAt: now,
             updatedAt: now,
@@ -1944,9 +1948,17 @@ export function heartbeatService(db: Db) {
 
   /**
    * Safety-net reaper: finds issues whose executionRunId or checkoutRunId points to a
-   * run in a terminal state (succeeded/failed/cancelled/timed_out) and nulls out both
-   * lock columns.  This handles any edge case where releaseIssueExecutionAndPromote was
-   * skipped (e.g. a crash between setRunStatus and the release call).
+   * run in a terminal state and nulls out both lock columns.  This handles any edge case
+   * where releaseIssueExecutionAndPromote was skipped (e.g. a crash between setRunStatus
+   * and the release call).
+   *
+   * Terminal run statuses:
+   *   "succeeded" | "failed" | "cancelled" | "timed_out"
+   *
+   * Note: process_lost is an errorCode (not a separate status) — those runs are finalized
+   * with status="failed".  The enqueueProcessLossRetry path transfers both executionRunId
+   * AND checkoutRunId to the retry run, so a retried issue will never appear stale here
+   * while the retry is still live.
    */
   async function reapStaleIssueLocks() {
     const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"];
