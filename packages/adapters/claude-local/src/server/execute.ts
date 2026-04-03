@@ -26,6 +26,7 @@ import {
   parseClaudeStreamJson,
   describeClaudeFailure,
   detectClaudeLoginRequired,
+  detectClaudeRateLimited,
   isClaudeMaxTurnsResult,
   isClaudeUnknownSessionError,
 } from "./parse.js";
@@ -493,6 +494,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       stdout: proc.stdout,
       stderr: proc.stderr,
     });
+    const rateMeta = detectClaudeRateLimited({
+      parsed,
+      stdout: proc.stdout,
+      stderr: proc.stderr,
+    });
     const errorMeta =
       loginMeta.loginUrl != null
         ? {
@@ -513,12 +519,17 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
 
     if (!parsed) {
+      const errorCode = loginMeta.requiresLogin
+        ? "auth_required"
+        : rateMeta.rateLimited
+          ? "rate_limited"
+          : "startup_failure";
       return {
         exitCode: proc.exitCode,
         signal: proc.signal,
         timedOut: false,
         errorMessage: parseFallbackErrorMessage(proc),
-        errorCode: loginMeta.requiresLogin ? "claude_auth_required" : null,
+        errorCode: (proc.exitCode ?? 0) !== 0 ? errorCode : null,
         errorMeta,
         resultJson: {
           stdout: proc.stdout,
@@ -553,6 +564,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       : null;
     const clearSessionForMaxTurns = isClaudeMaxTurnsResult(parsed);
 
+    const exitErrorCode = loginMeta.requiresLogin
+      ? "auth_required"
+      : rateMeta.rateLimited
+        ? "rate_limited"
+        : null;
     return {
       exitCode: proc.exitCode,
       signal: proc.signal,
@@ -561,7 +577,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         (proc.exitCode ?? 0) === 0
           ? null
           : describeClaudeFailure(parsed) ?? `Claude exited with code ${proc.exitCode ?? -1}`,
-      errorCode: loginMeta.requiresLogin ? "claude_auth_required" : null,
+      errorCode: exitErrorCode,
       errorMeta,
       usage,
       sessionId: resolvedSessionId,
