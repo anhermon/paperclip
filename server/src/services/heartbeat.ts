@@ -63,7 +63,9 @@ import {
 import { categorizeAdapterError } from "./adapter-failure-taxonomy.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
-const TERMINAL_RUN_STATUSES = ["skipped", "succeeded", "failed", "cancelled", "timed_out"] as const;
+// Terminal statuses for heartbeatRuns (matches HeartbeatRunStatus from @paperclipai/shared).
+// "skipped" is a WakeupRequestStatus, not a heartbeat run status — excluded intentionally.
+const TERMINAL_RUN_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"] as const;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT = 1;
 const HEARTBEAT_MAX_CONCURRENT_RUNS_MAX = 10;
 const DEFERRED_WAKE_CONTEXT_KEY = "_paperclipWakeContext";
