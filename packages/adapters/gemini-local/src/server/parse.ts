@@ -279,3 +279,95 @@ export function isGeminiTurnLimitResult(
   const error = asString(parsed.error, "").trim();
   return /turn\s*limit|max(?:imum)?\s+turns?/i.test(error);
 }
+
+/**
+ * Format a single Gemini stream-json stdout line into a human-readable string.
+ *
+ * Returns:
+ * - A formatted string for events that carry user-visible content
+ * - `null` for bookkeeping events (usage, step tracking, etc.) that should be dropped
+ *
+ * This prevents raw JSON blobs (tool_use, tool_result, etc.) from appearing
+ * verbatim in the run transcript.
+ */
+export function formatGeminiStreamJsonLine(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  const event = parseJson(trimmed);
+  if (!event) {
+    // Not a JSON line — pass through as-is (handles plain text from Gemini)
+    return trimmed;
+  }
+
+  const type = asString(event.type, "").trim();
+
+  switch (type) {
+    case "assistant": {
+      const parts = collectMessageText(event.message);
+      return parts.length > 0 ? parts.join("\n") : null;
+    }
+
+    case "text": {
+      const part = parseObject(event.part);
+      const text = asString(part.text, "").trim();
+      return text || null;
+    }
+
+    case "tool_use": {
+      const name = asString(event.name, "").trim() || asString(event.tool, "").trim();
+      const inputRaw = event.input ?? event.parameters ?? event.args;
+      let args = "";
+      try {
+        args = inputRaw != null ? JSON.stringify(inputRaw) : "";
+      } catch {
+        args = String(inputRaw ?? "");
+      }
+      return name ? `[Tool: ${name}${args ? `(${args})` : ""}]` : null;
+    }
+
+    case "tool_result": {
+      const content = asString(event.result, "") || asString(event.content, "") || asString(event.output, "");
+      const toolName = asString(event.name, "").trim() || asString(event.tool, "").trim();
+      const prefix = toolName ? `[Tool result: ${toolName}]` : "[Tool result]";
+      const trimmedContent = content.trim().slice(0, 500);
+      return trimmedContent ? `${prefix} ${trimmedContent}` : prefix;
+    }
+
+    case "error":
+    case "system": {
+      const text = asErrorText(event.error ?? event.message ?? event.detail).trim();
+      return text ? `[Error] ${text}` : null;
+    }
+
+    case "result": {
+      // Final result event — emit result text if present and exit was non-zero (error case)
+      const isError = event.is_error === true || asString(event.subtype, "").toLowerCase() === "error";
+      if (isError) {
+        const text = asErrorText(event.error ?? event.message ?? event.result).trim();
+        return text ? `[Error] ${text}` : null;
+      }
+      // Success result — content already captured via "assistant" events; suppress duplicate
+      return null;
+    }
+
+    case "step_start":
+    case "step_finish":
+    case "system_prompt":
+    case "user": {
+      // Bookkeeping events — drop from visible transcript
+      return null;
+    }
+
+    default: {
+      // Unknown event types with usage/metadata fields — drop (bookkeeping)
+      if (event.usage ?? event.usageMetadata ?? event.cost_usd ?? event.total_cost_usd) return null;
+      // Unknown content event — emit raw JSON as a bracketed fallback so nothing is silently lost
+      try {
+        return `[${type || "event"}] ${JSON.stringify(event)}`;
+      } catch {
+        return null;
+      }
+    }
+  }
+}

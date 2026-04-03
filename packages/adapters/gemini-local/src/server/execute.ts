@@ -28,9 +28,11 @@ import { DEFAULT_GEMINI_LOCAL_MODEL } from "../index.js";
 import {
   describeGeminiFailure,
   detectGeminiAuthRequired,
+  detectGeminiQuotaExhausted,
   isGeminiTurnLimitResult,
   isGeminiUnknownSessionError,
   parseGeminiJsonl,
+  formatGeminiStreamJsonLine,
 } from "./parse.js";
 import { firstNonEmptyLine } from "./utils.js";
 
@@ -353,13 +355,30 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       });
     }
 
+    // Wrap onLog to reformat stream-json lines into human-readable text.
+    // Without this, raw tool_use/tool_result JSON events appear verbatim in the run log.
+    const formattingOnLog: typeof onLog = async (stream, chunk) => {
+      if (stream === "stdout") {
+        const formatted = chunk
+          .split(/\r?\n/)
+          .map((line) => formatGeminiStreamJsonLine(line))
+          .filter((line): line is string => line !== null)
+          .join("\n");
+        if (formatted.length > 0) {
+          await onLog(stream, formatted + "\n");
+        }
+      } else {
+        await onLog(stream, chunk);
+      }
+    };
+
     const proc = await runChildProcess(runId, command, args, {
       cwd,
       env,
       timeoutSec,
       graceSec,
       onSpawn,
-      onLog,
+      onLog: formattingOnLog,
     });
     return {
       proc,
@@ -382,6 +401,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     isRetry = false,
   ): AdapterExecutionResult => {
     const authMeta = detectGeminiAuthRequired({
+      parsed: attempt.parsed.resultEvent,
+      stdout: attempt.proc.stdout,
+      stderr: attempt.proc.stderr,
+    });
+    const quotaMeta = detectGeminiQuotaExhausted({
       parsed: attempt.parsed.resultEvent,
       stdout: attempt.proc.stdout,
       stderr: attempt.proc.stderr,
@@ -418,18 +442,33 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const structuredFailure = attempt.parsed.resultEvent
       ? describeGeminiFailure(attempt.parsed.resultEvent)
       : null;
+    // For quota/rate-limit failures, emit a clean human-readable message rather than
+    // exposing raw provider error text (which may include malformed URLs or internal details).
+    const quotaErrorMessage = quotaMeta.exhausted
+      ? "Gemini rate limit or quota exhausted — will retry on next heartbeat cycle"
+      : null;
     const fallbackErrorMessage =
+      quotaErrorMessage ||
       parsedError ||
       structuredFailure ||
       stderrLine ||
       `Gemini exited with code ${attempt.proc.exitCode ?? -1}`;
 
+    const isFailure = (attempt.proc.exitCode ?? 0) !== 0;
+    const errorCode = isFailure
+      ? authMeta.requiresAuth
+        ? "gemini_auth_required"
+        : quotaMeta.exhausted
+          ? "rate_limited"
+          : null
+      : null;
+
     return {
       exitCode: attempt.proc.exitCode,
       signal: attempt.proc.signal,
       timedOut: false,
-      errorMessage: (attempt.proc.exitCode ?? 0) === 0 ? null : fallbackErrorMessage,
-      errorCode: (attempt.proc.exitCode ?? 0) !== 0 && authMeta.requiresAuth ? "gemini_auth_required" : null,
+      errorMessage: isFailure ? fallbackErrorMessage : null,
+      errorCode,
       usage: attempt.parsed.usage,
       sessionId: resolvedSessionId,
       sessionParams: resolvedSessionParams,
