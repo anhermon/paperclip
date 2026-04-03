@@ -19,6 +19,7 @@ type BlockedIssue = {
   id: string;
   identifier: string | null;
   title: string;
+  priority: string;
   assigneeAgentId: string | null;
   updatedAt: Date | string;
 };
@@ -67,6 +68,7 @@ async function fetchBlockedIssues(ctx: PluginContext, companyId: string): Promis
       id: issue.id,
       identifier: issue.identifier,
       title: issue.title,
+      priority: issue.priority,
       assigneeAgentId: issue.assigneeAgentId ?? null,
       updatedAt: issue.updatedAt,
     }));
