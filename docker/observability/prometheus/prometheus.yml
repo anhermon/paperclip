@@ -8,7 +8,7 @@ scrape_configs:
   - job_name: paperclip-server
     static_configs:
       - targets:
-          - "${PAPERCLIP_METRICS_HOST:-server}:${PAPERCLIP_METRICS_PORT:-3100}"
+          - "server:3100"
     metrics_path: /metrics
     scrape_interval: 15s
 
