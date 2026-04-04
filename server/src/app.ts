@@ -48,6 +48,7 @@ import { pluginRegistryService } from "./services/plugin-registry.js";
 import { createHostClientHandlers } from "@paperclipai/plugin-sdk";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
 import { telegramRoutes } from "./routes/telegram.js";
+import { adminRoutes } from "./routes/admin.js";
 
 type UiMode = "none" | "static" | "vite-dev";
 
@@ -157,6 +158,7 @@ export async function createApp(
   api.use(sidebarBadgeRoutes(db));
   api.use(instanceSettingsRoutes(db));
   api.use(telegramRoutes(db));
+  api.use(adminRoutes(db));
   const hostServicesDisposers = new Map<string, () => void>();
   const workerManager = createPluginWorkerManager();
   const pluginRegistry = pluginRegistryService(db);
