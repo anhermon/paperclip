@@ -12,6 +12,7 @@
 #   PROMETHEUS_PORT      - Prometheus port (default: 9090)
 #   LOKI_PORT            - Loki push/query port (default: 3101, avoids conflict with Paperclip server on :3100)
 #   TEMPO_PORT           - Tempo OTLP gRPC port (default: 4317)
+#   HOMER_PORT           - Homer dashboard port (default: 8080)
 #   PAPERCLIP_API_URL    - Paperclip server URL for scraping /metrics (default: http://server:3100)
 
 services:
@@ -98,6 +99,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 15
+    restart: unless-stopped
+
+  homer:
+    image: b4bz/homer:latest
+    ports:
+      - "${HOMER_PORT:-8080}:8080"
+    volumes:
+      - ./docker/observability/homer/config.yml:/www/assets/config.yml:ro
     restart: unless-stopped
 
 volumes:
