@@ -155,6 +155,14 @@ const BUNDLED_PLUGIN_EXAMPLES: AvailablePluginExample[] = [
     localPath: "packages/plugins/examples/plugin-feedback-collection",
     tag: "example",
   },
+  {
+    packageName: "@paperclipai/plugin-agent-activity",
+    pluginKey: "paperclip.agent-activity",
+    displayName: "Agent Activity",
+    description: "Clean, noise-free view of agent activity. Strips injected context and surfaces only the meaningful work turns: tool calls, comments posted, and current task per running agent.",
+    localPath: "packages/plugins/examples/plugin-agent-activity",
+    tag: "example",
+  },
 ];
 
 function listBundledPluginExamples(): AvailablePluginExample[] {

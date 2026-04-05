@@ -115,7 +115,7 @@ Optional override:
 3. **Run a promotion** to verify end-to-end:
    ```bash
    export PAPERCLIP_API_KEY=<key>
-   export PAPERCLIP_COMPANY_ID=dbc742c7-9a38-4542-936b-523dfa3a7fd2
+   export PAPERCLIP_COMPANY_ID=<company-uuid>
    ./scripts/promote-skill.sh paperclip --no-git --no-import  # dry-run copy only
    ```
 
