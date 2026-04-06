@@ -18,7 +18,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -231,7 +231,7 @@ function resolveProjectRoot(): string {
     const candidate = path.resolve(scriptDir, "..");
     // Verify this is the project root
     const pkgPath = path.join(candidate, "package.json");
-    const pkg = JSON.parse(require("node:fs").readFileSync(pkgPath, "utf8"));
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
     if (pkg.name === "paperclip") {
       console.error(`PROJECT_ROOT resolved via import.meta.url: ${candidate}`);
       return candidate;
@@ -243,7 +243,7 @@ function resolveProjectRoot(): string {
   let dir = process.cwd();
   for (let i = 0; i < 10; i++) {
     try {
-      const pkg = JSON.parse(require("node:fs").readFileSync(path.join(dir, "package.json"), "utf8"));
+      const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
       if (pkg.name === "paperclip") {
         console.error(`PROJECT_ROOT resolved via cwd walk-up: ${dir}`);
         return dir;
