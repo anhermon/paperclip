@@ -263,20 +263,25 @@ async function execQuiet(cmd: string, args: string[], opts?: { cwd?: string; max
 }
 
 async function globSourceFiles(): Promise<string[]> {
-  const files: string[] = [];
-  for (const pattern of SOURCE_DIRS) {
-    try {
-      const { stdout } = await execQuiet("find", [
-        path.join(PROJECT_ROOT, pattern.replace("*", "")),
-        "-name", "*.ts", "-not", "-name", "*.d.ts",
-        "-not", "-path", "*/node_modules/*",
-        "-not", "-path", "*/dist/*",
-        "-type", "f",
-      ]);
-      files.push(...stdout.trim().split("\n").filter(Boolean));
-    } catch { /* skip */ }
+  // Use a single find from PROJECT_ROOT with broad source directory matching
+  try {
+    const { stdout } = await execQuiet("find", [
+      path.join(PROJECT_ROOT, "server", "src"),
+      path.join(PROJECT_ROOT, "packages"),
+      path.join(PROJECT_ROOT, "cli", "src"),
+      path.join(PROJECT_ROOT, "ui", "src"),
+      "-name", "*.ts",
+      "-not", "-name", "*.d.ts",
+      "-not", "-name", "*.test.ts",
+      "-not", "-name", "*.spec.ts",
+      "-not", "-path", "*/node_modules/*",
+      "-not", "-path", "*/dist/*",
+      "-type", "f",
+    ]);
+    return stdout.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
   }
-  return files;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +295,7 @@ async function runTests(): Promise<TestResults> {
     try {
       await execFileAsync(
         "npx",
-        ["vitest", "run", "--reporter=default", "--reporter=json", "--outputFile.json", jsonOutputFile],
+        ["vitest", "run", "--coverage", "--reporter=default", "--reporter=json", "--outputFile.json", jsonOutputFile],
         { maxBuffer: 50 * 1024 * 1024, cwd: PROJECT_ROOT, env: { ...process.env, NODE_ENV: "development" } },
       );
     } catch (error: any) {
