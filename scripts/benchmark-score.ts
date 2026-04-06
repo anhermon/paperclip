@@ -263,13 +263,21 @@ async function execQuiet(cmd: string, args: string[], opts?: { cwd?: string; max
 }
 
 async function globSourceFiles(): Promise<string[]> {
-  // Use a single find from PROJECT_ROOT with broad source directory matching
-  try {
-    const { stdout } = await execQuiet("find", [
-      path.join(PROJECT_ROOT, "server", "src"),
-      path.join(PROJECT_ROOT, "packages"),
-      path.join(PROJECT_ROOT, "cli", "src"),
-      path.join(PROJECT_ROOT, "ui", "src"),
+  // Find all .ts source files by scanning each known source directory individually
+  // to avoid `find` failing entirely when one directory doesn't exist
+  const candidateDirs = [
+    path.join(PROJECT_ROOT, "server", "src"),
+    path.join(PROJECT_ROOT, "packages"),
+    path.join(PROJECT_ROOT, "cli", "src"),
+    path.join(PROJECT_ROOT, "ui", "src"),
+  ];
+
+  const files: string[] = [];
+  for (const dir of candidateDirs) {
+    // Check if directory exists first
+    try { await fs.access(dir); } catch { continue; }
+    const result = await execQuiet("find", [
+      dir,
       "-name", "*.ts",
       "-not", "-name", "*.d.ts",
       "-not", "-name", "*.test.ts",
@@ -278,10 +286,9 @@ async function globSourceFiles(): Promise<string[]> {
       "-not", "-path", "*/dist/*",
       "-type", "f",
     ]);
-    return stdout.trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
+    files.push(...result.stdout.trim().split("\n").filter(Boolean));
   }
+  return files;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,8 +302,18 @@ async function runTests(): Promise<TestResults> {
     try {
       await execFileAsync(
         "npx",
-        ["vitest", "run", "--coverage", "--reporter=default", "--reporter=json", "--outputFile.json", jsonOutputFile],
-        { maxBuffer: 50 * 1024 * 1024, cwd: PROJECT_ROOT, env: { ...process.env, NODE_ENV: "development" } },
+        [
+          "vitest", "run", "--coverage",
+          "--reporter=default", "--reporter=json",
+          "--outputFile.json", jsonOutputFile,
+        ],
+        {
+          maxBuffer: 50 * 1024 * 1024,
+          cwd: PROJECT_ROOT,
+          env: { ...process.env, NODE_ENV: "development" },
+          // Ensure vitest finds the root config
+          shell: false,
+        },
       );
     } catch (error: any) {
       try { await fs.access(jsonOutputFile); } catch {
@@ -370,13 +387,28 @@ function computeTestScore(results: TestResults): number {
 // ---------------------------------------------------------------------------
 
 async function readCoverage(): Promise<CoverageSummary["total"] | null> {
-  try {
-    const coveragePath = path.join(PROJECT_ROOT, "coverage/coverage-summary.json");
-    const raw = await fs.readFile(coveragePath, "utf8");
-    return (JSON.parse(raw) as CoverageSummary).total;
-  } catch {
-    return null;
+  // Try multiple possible coverage locations
+  const candidates = [
+    path.join(PROJECT_ROOT, "coverage", "coverage-summary.json"),
+    path.join(PROJECT_ROOT, "server", "coverage", "coverage-summary.json"),
+    path.join(process.cwd(), "coverage", "coverage-summary.json"),
+  ];
+  for (const coveragePath of candidates) {
+    try {
+      const raw = await fs.readFile(coveragePath, "utf8");
+      console.error(`Coverage data found at: ${coveragePath}`);
+      return (JSON.parse(raw) as CoverageSummary).total;
+    } catch { /* try next */ }
   }
+  // Debug: list what's in the coverage directory
+  try {
+    const coverageDir = path.join(PROJECT_ROOT, "coverage");
+    const files = await fs.readdir(coverageDir);
+    console.error(`Coverage dir contents: ${files.join(", ")}`);
+  } catch {
+    console.error(`No coverage directory found at ${path.join(PROJECT_ROOT, "coverage")}`);
+  }
+  return null;
 }
 
 function computeCoverageScore(coverage: CoverageSummary["total"] | null): number {
