@@ -224,15 +224,36 @@ async function getGitInfo(): Promise<{ commit: string; branch: string }> {
 }
 
 function resolveProjectRoot(): string {
-  let dir = path.dirname(new URL(import.meta.url).pathname);
-  for (let i = 0; i < 5; i++) {
-    const parent = path.dirname(dir);
+  // This script lives at <PROJECT_ROOT>/scripts/benchmark-score.ts
+  // Use import.meta.url to resolve the script path, then go up one level
+  try {
+    const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+    const candidate = path.resolve(scriptDir, "..");
+    // Verify this is the project root
+    const pkgPath = path.join(candidate, "package.json");
+    const pkg = JSON.parse(require("node:fs").readFileSync(pkgPath, "utf8"));
+    if (pkg.name === "paperclip") {
+      console.error(`PROJECT_ROOT resolved via import.meta.url: ${candidate}`);
+      return candidate;
+    }
+  } catch (err) {
+    console.error(`resolveProjectRoot via import.meta.url failed: ${err}`);
+  }
+  // Fallback: walk up from cwd looking for root package.json
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
     try {
-      const pkg = JSON.parse(require("node:fs").readFileSync(path.join(parent, "package.json"), "utf8"));
-      if (pkg.name === "paperclip") return parent;
+      const pkg = JSON.parse(require("node:fs").readFileSync(path.join(dir, "package.json"), "utf8"));
+      if (pkg.name === "paperclip") {
+        console.error(`PROJECT_ROOT resolved via cwd walk-up: ${dir}`);
+        return dir;
+      }
     } catch { /* continue */ }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
     dir = parent;
   }
+  console.error(`PROJECT_ROOT fallback to cwd: ${process.cwd()}`);
   return process.cwd();
 }
 
