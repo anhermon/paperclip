@@ -10,7 +10,7 @@ If `PAPERCLIP_APPROVAL_ID` is set:
 
 ## 2. Assignments
 
-Use `paperclip` skill for inbox and checkout. Prioritize `in_progress` → `todo`. Skip `blocked` unless unblockable.
+Use `paperclip` skill for inbox and checkout. Prioritize `in_progress` → `todo`. Skip `blocked` unless you can unblock it.
 
 ## 3. Triage and Delegate
 
