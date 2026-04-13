@@ -81,6 +81,8 @@ export interface UsageSummary {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  /** Tokens written to the Anthropic prompt cache this heartbeat (billed at 1.25× normal). */
+  cacheCreationInputTokens?: number;
 }
 
 export type AdapterBillingType =
