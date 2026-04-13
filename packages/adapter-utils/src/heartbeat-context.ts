@@ -88,7 +88,8 @@ function readContextLayers(
   context: Record<string, unknown> | null | undefined,
 ): AdapterInvocationLayer[] {
   const heartbeatContext = asObject(context?.paperclipHeartbeatContext);
-  const rawLayers = Array.isArray(heartbeatContext?.layers) ? heartbeatContext.layers : [];
+  const contextLayers = heartbeatContext?.layers;
+  const rawLayers = Array.isArray(contextLayers) ? contextLayers : [];
   return rawLayers
     .map((value) => asLayer(value))
     .filter((value): value is AdapterInvocationLayer => value !== null);
