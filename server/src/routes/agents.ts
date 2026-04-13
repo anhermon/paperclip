@@ -867,6 +867,7 @@ export function agentRoutes(db: Db) {
       companyId: agent.companyId,
       adapterType: agent.adapterType,
       config: runtimeSkillConfig,
+      agentUrlKey: deriveAgentUrlKey(agent.name),
     });
     res.json(snapshot);
   });
@@ -927,12 +928,14 @@ export function agentRoutes(db: Db) {
         ...runtimeConfig,
         paperclipRuntimeSkills: runtimeSkillEntries,
       };
+      const updatedAgentUrlKey = deriveAgentUrlKey(updated.name);
       const snapshot = adapter?.syncSkills
         ? await adapter.syncSkills({
             agentId: updated.id,
             companyId: updated.companyId,
             adapterType: updated.adapterType,
             config: runtimeSkillConfig,
+            agentUrlKey: updatedAgentUrlKey,
           }, desiredSkills)
         : adapter?.listSkills
           ? await adapter.listSkills({
@@ -940,6 +943,7 @@ export function agentRoutes(db: Db) {
               companyId: updated.companyId,
               adapterType: updated.adapterType,
               config: runtimeSkillConfig,
+              agentUrlKey: updatedAgentUrlKey,
             })
           : buildUnsupportedSkillSnapshot(updated.adapterType, desiredSkills);
 

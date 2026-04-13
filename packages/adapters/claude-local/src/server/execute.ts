@@ -43,7 +43,7 @@ const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
  * the repo's `skills/` directory, so `--add-dir` makes Claude Code discover
  * them as proper registered skills.
  */
-async function buildSkillsDir(config: Record<string, unknown>): Promise<string> {
+async function buildSkillsDir(config: Record<string, unknown>, agentUrlKey?: string | null): Promise<string> {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-skills-"));
   const target = path.join(tmp, ".claude", "skills");
   await fs.mkdir(target, { recursive: true });
@@ -52,6 +52,7 @@ async function buildSkillsDir(config: Record<string, unknown>): Promise<string> 
     resolveClaudeDesiredSkillNames(
       config,
       availableEntries,
+      agentUrlKey,
     ),
   );
   for (const entry of availableEntries) {
@@ -372,7 +373,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     ),
   );
   const billingType = resolveClaudeBillingType(effectiveEnv);
-  const skillsDir = await buildSkillsDir(config);
+  const agentUrlKey = agent.name
+    ? agent.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null
+    : null;
+  const skillsDir = await buildSkillsDir(config, agentUrlKey);
 
   const runtimeSessionParams = parseObject(runtime.sessionParams);
   const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
