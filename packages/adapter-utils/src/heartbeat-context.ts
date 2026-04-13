@@ -1,5 +1,4 @@
 import type { AdapterInvocationLayer, HeartbeatMemoryClass } from "./types.js";
-import { joinPromptSections } from "./server-utils.js";
 
 /**
  * A single context fragment contributed to the heartbeat prompt.
@@ -152,7 +151,7 @@ export function assembleHeartbeatInvocation(
     });
   }
 
-  const prompt = joinPromptSections(promptSections);
+  const prompt = promptSections.filter(Boolean).join("\n\n");
   promptMetrics.promptChars = prompt.length;
   return {
     prompt,
