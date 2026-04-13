@@ -443,6 +443,7 @@ export function renderPaperclipWakePrompt(
         isCompressedResume
           ? "Continuing current task. Static issue context omitted — only new deltas follow."
           : "You are resuming an existing Paperclip session.",
+        ...(!isCompressedResume ? ["This heartbeat is scoped to the issue below. Do not switch to another issue until you have handled this wake."] : []),
         "Focus on the new wake delta below and continue the current task without restating the full heartbeat boilerplate.",
         "Fetch the API thread only when `fallbackFetchNeeded` is true or you need broader history than this batch.",
         "",
