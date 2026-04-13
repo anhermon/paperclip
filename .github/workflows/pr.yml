@@ -174,9 +174,8 @@ jobs:
               for (const [k,v] of Object.entries(r)) {
                 if (v.pct !== undefined) console.log('| ' + k + ' | ' + v.covered + ' | ' + v.total + ' | ' + v.pct + '% |');
               }
-            " >> \"$GITHUB_STEP_SUMMARY\"
+            " >> "$GITHUB_STEP_SUMMARY"
           fi
-
 
       - name: Build
         run: pnpm build
