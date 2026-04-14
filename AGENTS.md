@@ -154,6 +154,21 @@ pnpm test:release-smoke
 
 Run the browser suites only when your change touches them or when you are explicitly verifying CI/release flows.
 
+Default local/agent test path:
+
+```sh
+pnpm test
+```
+
+This is the cheap default and only runs the Vitest suite. Browser suites stay opt-in:
+
+```sh
+pnpm test:e2e
+pnpm test:release-smoke
+```
+
+Run the browser suites only when your change touches them or when you are explicitly verifying CI/release flows.
+
 Run this full check before claiming done:
 
 ```sh
