@@ -37,6 +37,10 @@ export function BreadcrumbProvider({ children }: { children: ReactNode }) {
     setMobileToolbarState(node);
   }, []);
 
+  const setMobileToolbar = useCallback((node: ReactNode | null) => {
+    setMobileToolbarState(node);
+  }, []);
+
   useEffect(() => {
     if (breadcrumbs.length === 0) {
       document.title = "Paperclip";
