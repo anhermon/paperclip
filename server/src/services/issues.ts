@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   activityLog,
@@ -81,6 +81,7 @@ export interface IssueFilters {
   includeRoutineExecutions?: boolean;
   q?: string;
   limit?: number;
+  updatedAfter?: Date | string;
 }
 
 type IssueRow = typeof issues.$inferSelect;
@@ -967,6 +968,10 @@ export function issueService(db: Db) {
       if (filters?.parentId) conditions.push(eq(issues.parentId, filters.parentId));
       if (filters?.originKind) conditions.push(eq(issues.originKind, filters.originKind));
       if (filters?.originId) conditions.push(eq(issues.originId, filters.originId));
+      if (filters?.updatedAfter) {
+        const ts = filters.updatedAfter instanceof Date ? filters.updatedAfter : new Date(filters.updatedAfter);
+        conditions.push(gte(issues.updatedAt, ts));
+      }
       if (filters?.labelId) {
         const labeledIssueIds = await db
           .select({ issueId: issueLabels.issueId })
