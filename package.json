@@ -63,7 +63,14 @@
       "hermes-paperclip-adapter@0.2.0": "patches/hermes-paperclip-adapter@0.2.0.patch"
     },
     "overrides": {
-      "rollup": ">=4.59.0"
+      "rollup": ">=4.59.0",
+      "protobufjs": ">=7.5.5",
+      "fast-xml-parser": ">=5.5.7",
+      "picomatch": ">=4.0.4",
+      "path-to-regexp": ">=8.4.0",
+      "defu": ">=6.1.5",
+      "kysely": ">=0.28.14",
+      "esbuild": ">=0.25.0"
     }
   }
 }
