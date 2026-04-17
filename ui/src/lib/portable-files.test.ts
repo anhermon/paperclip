@@ -16,7 +16,7 @@ describe("getPortableFileText", () => {
   });
 
   it("returns null when entry is an object", () => {
-    expect(getPortableFileText({ data: "base64", contentType: "image/png" })).toBeNull();
+    expect(getPortableFileText({ encoding: "base64", data: "base64", contentType: "image/png" })).toBeNull();
   });
 
   it("returns null for null entry", () => {
@@ -34,7 +34,7 @@ describe("getPortableFileText", () => {
 
 describe("getPortableFileContentType", () => {
   it("returns contentType from object entry when provided", () => {
-    const entry = { data: "abc", contentType: "image/gif" };
+    const entry = { encoding: "base64" as const, data: "abc", contentType: "image/gif" };
     expect(getPortableFileContentType("file.png", entry)).toBe("image/gif");
   });
 
@@ -82,21 +82,21 @@ describe("getPortableFileContentType", () => {
 
 describe("getPortableFileDataUrl", () => {
   it("returns a data URL for a binary entry", () => {
-    const entry = { data: "abc123==", contentType: "image/png" };
+    const entry = { encoding: "base64" as const, data: "abc123==", contentType: "image/png" };
     const result = getPortableFileDataUrl("photo.png", entry);
     expect(result).toBe("data:image/png;base64,abc123==");
   });
 
   it("infers contentType from extension when not in entry object", () => {
-    const entry = { data: "xyz", contentType: "" };
+    const entry = { encoding: "base64" as const, data: "xyz", contentType: "" };
     // contentType is empty string (falsy), falls through to extension inference
     const result = getPortableFileDataUrl("icon.svg", entry);
     expect(result).toContain("image/svg+xml");
   });
 
   it("uses application/octet-stream for unknown extension", () => {
-    const entry = { data: "xyz" };
-    const result = getPortableFileDataUrl("archive.bin", entry as { data: string });
+    const entry = { encoding: "base64" as const, data: "xyz" };
+    const result = getPortableFileDataUrl("archive.bin", entry);
     expect(result).toContain("application/octet-stream");
     expect(result).toContain("base64,xyz");
   });
@@ -120,7 +120,7 @@ describe("isPortableImageFile", () => {
   });
 
   it("returns true for an object entry with image contentType", () => {
-    const entry = { data: "abc", contentType: "image/webp" };
+    const entry = { encoding: "base64" as const, data: "abc", contentType: "image/webp" };
     expect(isPortableImageFile("file.bin", entry)).toBe(true);
   });
 

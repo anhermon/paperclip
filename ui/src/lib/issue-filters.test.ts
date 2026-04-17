@@ -216,14 +216,14 @@ describe("applyIssueFilters", () => {
     expect(result[0]?.id).toBe("1");
   });
 
-  it("filters routine executions when flag is enabled", () => {
+  it("filters routine executions when hideRoutineExecutions is true", () => {
     const issues = [
       makeIssue({ id: "1", originKind: "manual" }),
       makeIssue({ id: "2", originKind: "routine_execution" }),
     ];
     const result = applyIssueFilters(
       issues,
-      { ...defaultIssueFilterState, showRoutineExecutions: false },
+      { ...defaultIssueFilterState, hideRoutineExecutions: true },
       undefined,
       true,
     );
@@ -231,14 +231,14 @@ describe("applyIssueFilters", () => {
     expect(result[0]?.id).toBe("1");
   });
 
-  it("shows routine executions when showRoutineExecutions is true", () => {
+  it("shows routine executions when hideRoutineExecutions is false", () => {
     const issues = [
       makeIssue({ id: "1", originKind: "manual" }),
       makeIssue({ id: "2", originKind: "routine_execution" }),
     ];
     const result = applyIssueFilters(
       issues,
-      { ...defaultIssueFilterState, showRoutineExecutions: true },
+      { ...defaultIssueFilterState, hideRoutineExecutions: false },
       undefined,
       true,
     );
@@ -270,31 +270,32 @@ describe("countActiveIssueFilters", () => {
     expect(countActiveIssueFilters(state)).toBe(2);
   });
 
-  it("counts all 6 dimensions when all set", () => {
+  it("counts all 7 dimensions when all set", () => {
     const state = {
       statuses: ["todo"],
       priorities: ["high"],
       assignees: ["agent-1"],
+      creators: ["user-1"],
       labels: ["label-1"],
       projects: ["proj-1"],
       workspaces: ["ws-1"],
-      showRoutineExecutions: false,
+      hideRoutineExecutions: false,
     };
-    expect(countActiveIssueFilters(state)).toBe(6);
+    expect(countActiveIssueFilters(state)).toBe(7);
   });
 
-  it("counts showRoutineExecutions when flag is enabled and true", () => {
+  it("counts hideRoutineExecutions when flag is enabled and true", () => {
     const state = {
       ...defaultIssueFilterState,
-      showRoutineExecutions: true,
+      hideRoutineExecutions: true,
     };
     expect(countActiveIssueFilters(state, true)).toBe(1);
   });
 
-  it("does not count showRoutineExecutions when enableRoutineVisibilityFilter is false", () => {
+  it("does not count hideRoutineExecutions when enableRoutineVisibilityFilter is false", () => {
     const state = {
       ...defaultIssueFilterState,
-      showRoutineExecutions: true,
+      hideRoutineExecutions: true,
     };
     expect(countActiveIssueFilters(state, false)).toBe(0);
   });
