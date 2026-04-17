@@ -80,13 +80,13 @@ export const httpLogger = pinoHttp({
     return `${req.method} ${req.url} ${res.statusCode}`;
   },
   customErrorMessage(req, res, err) {
-    const ctx = (res as any).__errorContext;
-    const errMsg = ctx?.error?.message || err?.message || (res as any).err?.message || "unknown error";
+    const ctx = res.__errorContext;
+    const errMsg = ctx?.error?.message || err?.message || res.err?.message || "unknown error";
     return `${req.method} ${req.url} ${res.statusCode} — ${errMsg}`;
   },
   customProps(req, res) {
     if (res.statusCode >= 400) {
-      const ctx = (res as any).__errorContext;
+      const ctx = res.__errorContext;
       if (ctx) {
         return {
           errorContext: ctx.error,
@@ -96,7 +96,7 @@ export const httpLogger = pinoHttp({
         };
       }
       const props: Record<string, unknown> = {};
-      const { body, params, query } = req as any;
+      const { body, params, query } = req;
       if (body && typeof body === "object" && Object.keys(body).length > 0) {
         props.reqBody = body;
       }
@@ -106,8 +106,8 @@ export const httpLogger = pinoHttp({
       if (query && typeof query === "object" && Object.keys(query).length > 0) {
         props.reqQuery = query;
       }
-      if ((req as any).route?.path) {
-        props.routePath = (req as any).route.path;
+      if (req.route?.path) {
+        props.routePath = req.route.path;
       }
       return props;
     }
