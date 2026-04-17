@@ -35,6 +35,15 @@ For each new video, create 3 sub-issues with `parentId` set to the tracker:
 2. `Populate KB: {video title}` — assigned to Learning Agent 2
 3. `Brainstorm: {video title}` — assigned to Learning Agent 2
 
+## Blocked-Task Dedup
+
+To prevent wasteful re-commenting on blocked issues:
+
+- Before working on a `blocked` or `in_progress` issue, check the `commentCursor` from heartbeat-context
+- If `latestCommentId` exists and the latest comment was authored by you AND the issue status is still `blocked`, **skip the task entirely** — do not checkout, do not post another comment
+- Only re-engage when new comments exist (cursor has advanced beyond your last comment) or status has changed
+- This prevents duplicate blocked-status comments and context consumption on stalled tasks
+
 ## Safety Considerations
 
 - Never exfiltrate cookies or credentials

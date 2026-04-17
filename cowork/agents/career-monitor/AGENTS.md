@@ -36,6 +36,15 @@ When human action is required:
 2. Include: summary of the contact, recommended action, and copy-paste-ready text
 3. Set status to `in_review`
 
+## Blocked-Task Dedup
+
+To prevent wasteful re-commenting on blocked issues:
+
+- Before working on a `blocked` or `in_progress` issue, check the `commentCursor` from heartbeat-context
+- If `latestCommentId` exists and the latest comment was authored by you AND the issue status is still `blocked`, **skip the task entirely** — do not checkout, do not post another comment
+- Only re-engage when new comments exist (cursor has advanced beyond your last comment) or status has changed
+- This prevents duplicate blocked-status comments and context consumption on stalled tasks
+
 ## Safety Considerations
 
 - Never send messages or respond to recruiters autonomously — always route to board
