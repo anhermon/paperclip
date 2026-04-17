@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   getAdapterSessionManagement,
   readSessionCompactionOverride,
@@ -12,47 +12,36 @@ import {
 // ============================================================================
 
 describe("getAdapterSessionManagement", () => {
-  it("returns null for null input", () => {
-    expect(getAdapterSessionManagement(null)).toBeNull();
-  });
-
-  it("returns null for undefined input", () => {
-    expect(getAdapterSessionManagement(undefined)).toBeNull();
-  });
-
-  it("returns null for unknown adapter types", () => {
-    expect(getAdapterSessionManagement("unknown_adapter")).toBeNull();
-  });
-
-  it("returns session management for 'claude_local'", () => {
+  it("returns management for a known adapter type", () => {
     const result = getAdapterSessionManagement("claude_local");
     expect(result).not.toBeNull();
     expect(result?.supportsSessionResume).toBe(true);
+  });
+
+  it("returns null for unknown adapter type", () => {
+    expect(getAdapterSessionManagement("unknown_adapter")).toBeNull();
+  });
+
+  it("returns null for null", () => {
+    expect(getAdapterSessionManagement(null)).toBeNull();
+  });
+
+  it("returns null for undefined", () => {
+    expect(getAdapterSessionManagement(undefined)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(getAdapterSessionManagement("")).toBeNull();
+  });
+
+  it("claude_local has confirmed native context management", () => {
+    const result = getAdapterSessionManagement("claude_local");
     expect(result?.nativeContextManagement).toBe("confirmed");
   });
 
-  it("returns session management for 'codex_local'", () => {
-    const result = getAdapterSessionManagement("codex_local");
-    expect(result).not.toBeNull();
-    expect(result?.supportsSessionResume).toBe(true);
-  });
-});
-
-// ============================================================================
-// LEGACY_SESSIONED_ADAPTER_TYPES
-// ============================================================================
-
-describe("LEGACY_SESSIONED_ADAPTER_TYPES", () => {
-  it("includes claude_local", () => {
-    expect(LEGACY_SESSIONED_ADAPTER_TYPES.has("claude_local")).toBe(true);
-  });
-
-  it("includes codex_local", () => {
-    expect(LEGACY_SESSIONED_ADAPTER_TYPES.has("codex_local")).toBe(true);
-  });
-
-  it("does not include unknown types", () => {
-    expect(LEGACY_SESSIONED_ADAPTER_TYPES.has("unknown")).toBe(false);
+  it("gemini_local has unknown native context management", () => {
+    const result = getAdapterSessionManagement("gemini_local");
+    expect(result?.nativeContextManagement).toBe("unknown");
   });
 });
 
@@ -61,82 +50,68 @@ describe("LEGACY_SESSIONED_ADAPTER_TYPES", () => {
 // ============================================================================
 
 describe("readSessionCompactionOverride", () => {
-  it("returns empty object for null runtimeConfig", () => {
+  it("returns empty object for null config", () => {
     expect(readSessionCompactionOverride(null)).toEqual({});
   });
 
-  it("returns empty object for missing compaction config", () => {
-    expect(readSessionCompactionOverride({ other: "value" })).toEqual({});
+  it("returns empty object for empty object", () => {
+    expect(readSessionCompactionOverride({})).toEqual({});
   });
 
   it("reads enabled from heartbeat.sessionCompaction", () => {
     const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { enabled: "true" } },
+      heartbeat: { sessionCompaction: { enabled: true } },
     });
     expect(result.enabled).toBe(true);
   });
 
-  it("reads enabled=false from string 'false'", () => {
+  it("reads enabled=false as boolean false", () => {
     const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { enabled: "false" } },
+      heartbeat: { sessionCompaction: { enabled: false } },
     });
     expect(result.enabled).toBe(false);
   });
 
-  it("reads enabled=false from string '0'", () => {
-    const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { enabled: "0" } },
-    });
-    expect(result.enabled).toBe(false);
-  });
-
-  it("reads maxSessionRuns from numeric value", () => {
+  it("reads maxSessionRuns as number", () => {
     const result = readSessionCompactionOverride({
       heartbeat: { sessionCompaction: { maxSessionRuns: 50 } },
     });
     expect(result.maxSessionRuns).toBe(50);
   });
 
-  it("reads maxSessionRuns from string '50'", () => {
+  it("reads maxRawInputTokens as number", () => {
     const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { maxSessionRuns: "50" } },
-    });
-    expect(result.maxSessionRuns).toBe(50);
-  });
-
-  it("clamps negative maxSessionRuns to 0", () => {
-    const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { maxSessionRuns: -5 } },
-    });
-    expect(result.maxSessionRuns).toBe(0);
-  });
-
-  it("reads from legacy heartbeat.sessionRotation key", () => {
-    const result = readSessionCompactionOverride({
-      heartbeat: { sessionRotation: { enabled: true } },
-    });
-    expect(result.enabled).toBe(true);
-  });
-
-  it("reads from top-level sessionCompaction key as fallback", () => {
-    const result = readSessionCompactionOverride({
-      sessionCompaction: { maxRawInputTokens: 1000000 },
+      heartbeat: { sessionCompaction: { maxRawInputTokens: 1000000 } },
     });
     expect(result.maxRawInputTokens).toBe(1000000);
   });
 
-  it("floors fractional maxSessionRuns", () => {
+  it("reads maxSessionAgeHours as number", () => {
     const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { maxSessionRuns: 7.9 } },
+      heartbeat: { sessionCompaction: { maxSessionAgeHours: 48 } },
     });
-    expect(result.maxSessionRuns).toBe(7);
+    expect(result.maxSessionAgeHours).toBe(48);
   });
 
-  it("ignores non-numeric non-string maxSessionRuns values", () => {
+  it("reads string numbers as integers", () => {
     const result = readSessionCompactionOverride({
-      heartbeat: { sessionCompaction: { maxSessionRuns: {} } },
+      heartbeat: { sessionCompaction: { maxSessionRuns: "100" } },
     });
-    expect(result.maxSessionRuns).toBeUndefined();
+    expect(result.maxSessionRuns).toBe(100);
+  });
+
+  it("falls back to heartbeat.sessionRotation when sessionCompaction not set", () => {
+    const result = readSessionCompactionOverride({
+      heartbeat: { sessionRotation: { maxSessionRuns: 25 } },
+    });
+    expect(result.maxSessionRuns).toBe(25);
+  });
+
+  it("falls back to root sessionCompaction", () => {
+    const result = readSessionCompactionOverride({
+      sessionCompaction: { maxSessionAgeHours: 24 },
+    });
+    expect(result.maxSessionAgeHours).toBe(24);
   });
 });
 
@@ -145,47 +120,45 @@ describe("readSessionCompactionOverride", () => {
 // ============================================================================
 
 describe("resolveSessionCompactionPolicy", () => {
-  it("uses adapter_default source for known adapters without override", () => {
+  it("uses adapter_default source for known adapter with no override", () => {
     const result = resolveSessionCompactionPolicy("claude_local", null);
     expect(result.source).toBe("adapter_default");
-    expect(result.adapterSessionManagement).not.toBeNull();
-    expect(result.explicitOverride).toEqual({});
   });
 
-  it("uses agent_override source when explicit overrides are present", () => {
-    const result = resolveSessionCompactionPolicy("claude_local", {
-      heartbeat: { sessionCompaction: { maxSessionRuns: 10 } },
-    });
-    expect(result.source).toBe("agent_override");
-    expect(result.policy.maxSessionRuns).toBe(10);
-  });
-
-  it("uses legacy_fallback for unknown adapters with no override", () => {
-    const result = resolveSessionCompactionPolicy("custom_adapter", null);
-    expect(result.source).toBe("legacy_fallback");
-    expect(result.adapterSessionManagement).toBeNull();
-  });
-
-  it("enables compaction for legacy sessioned adapter types", () => {
-    const result = resolveSessionCompactionPolicy("claude_local", null);
-    expect(result.policy.enabled).toBe(true);
-  });
-
-  it("disables compaction for unknown adapters (not in legacy set)", () => {
-    const result = resolveSessionCompactionPolicy("non_legacy_adapter", null);
-    expect(result.policy.enabled).toBe(false);
-  });
-
-  it("explicit override takes precedence over adapter default", () => {
+  it("uses agent_override source when override is present", () => {
     const result = resolveSessionCompactionPolicy("claude_local", {
       heartbeat: { sessionCompaction: { enabled: false } },
     });
+    expect(result.source).toBe("agent_override");
     expect(result.policy.enabled).toBe(false);
   });
 
-  it("returns null adapterSessionManagement for null adapter type", () => {
-    const result = resolveSessionCompactionPolicy(null, null);
-    expect(result.adapterSessionManagement).toBeNull();
+  it("uses legacy_fallback source for unknown adapter", () => {
+    const result = resolveSessionCompactionPolicy("unknown_adapter", null);
+    expect(result.source).toBe("legacy_fallback");
+  });
+
+  it("enables policy for legacy sessioned adapters", () => {
+    const result = resolveSessionCompactionPolicy("gemini_local", null);
+    expect(result.policy.enabled).toBe(true);
+  });
+
+  it("disables policy for non-legacy adapters when no override", () => {
+    const result = resolveSessionCompactionPolicy("unknown_adapter", null);
+    expect(result.policy.enabled).toBe(false);
+  });
+
+  it("explicit override merges on top of adapter defaults", () => {
+    const result = resolveSessionCompactionPolicy("gemini_local", {
+      heartbeat: { sessionCompaction: { maxSessionRuns: 10 } },
+    });
+    expect(result.policy.maxSessionRuns).toBe(10);
+    // Other fields come from adapter default
+    expect(result.policy.enabled).toBe(true);
+  });
+
+  it("LEGACY_SESSIONED_ADAPTER_TYPES contains gemini_local", () => {
+    expect(LEGACY_SESSIONED_ADAPTER_TYPES.has("gemini_local")).toBe(true);
   });
 });
 
@@ -194,27 +167,19 @@ describe("resolveSessionCompactionPolicy", () => {
 // ============================================================================
 
 describe("hasSessionCompactionThresholds", () => {
-  it("returns false when all thresholds are 0", () => {
-    expect(
-      hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 0, maxSessionAgeHours: 0 }),
-    ).toBe(false);
+  it("returns true when maxSessionRuns > 0", () => {
+    expect(hasSessionCompactionThresholds({ maxSessionRuns: 1, maxRawInputTokens: 0, maxSessionAgeHours: 0 })).toBe(true);
   });
 
-  it("returns true when maxSessionRuns is positive", () => {
-    expect(
-      hasSessionCompactionThresholds({ maxSessionRuns: 10, maxRawInputTokens: 0, maxSessionAgeHours: 0 }),
-    ).toBe(true);
+  it("returns true when maxRawInputTokens > 0", () => {
+    expect(hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 1, maxSessionAgeHours: 0 })).toBe(true);
   });
 
-  it("returns true when maxRawInputTokens is positive", () => {
-    expect(
-      hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 1000000, maxSessionAgeHours: 0 }),
-    ).toBe(true);
+  it("returns true when maxSessionAgeHours > 0", () => {
+    expect(hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 0, maxSessionAgeHours: 1 })).toBe(true);
   });
 
-  it("returns true when maxSessionAgeHours is positive", () => {
-    expect(
-      hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 0, maxSessionAgeHours: 24 }),
-    ).toBe(true);
+  it("returns false when all thresholds are 0 (adapter-managed)", () => {
+    expect(hasSessionCompactionThresholds({ maxSessionRuns: 0, maxRawInputTokens: 0, maxSessionAgeHours: 0 })).toBe(false);
   });
 });

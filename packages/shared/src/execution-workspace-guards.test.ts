@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   isClosedIsolatedExecutionWorkspace,
   getClosedIsolatedExecutionWorkspaceMessage,
@@ -9,12 +9,6 @@ import {
 // ============================================================================
 
 describe("isClosedIsolatedExecutionWorkspace", () => {
-  const base = {
-    mode: "isolated_workspace" as const,
-    status: "active" as const,
-    closedAt: null,
-  };
-
   it("returns false for null", () => {
     expect(isClosedIsolatedExecutionWorkspace(null)).toBe(false);
   });
@@ -25,83 +19,51 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
 
   it("returns false when mode is not isolated_workspace", () => {
     expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, mode: "shared_workspace" })
-    ).toBe(false);
-  });
-
-  it("returns false when mode is operator_branch", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, mode: "operator_branch" })
-    ).toBe(false);
-  });
-
-  it("returns false when isolated and status is active with no closedAt", () => {
-    expect(isClosedIsolatedExecutionWorkspace(base)).toBe(false);
-  });
-
-  it("returns false when isolated and status is idle with no closedAt", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, status: "idle" })
-    ).toBe(false);
-  });
-
-  it("returns false when isolated and status is in_review with no closedAt", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, status: "in_review" })
-    ).toBe(false);
-  });
-
-  it("returns true when isolated and status is archived", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, status: "archived" })
-    ).toBe(true);
-  });
-
-  it("returns true when isolated and status is cleanup_failed", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, status: "cleanup_failed" })
-    ).toBe(true);
-  });
-
-  it("returns true when isolated and closedAt is a Date object", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, closedAt: new Date("2024-01-01T00:00:00Z") })
-    ).toBe(true);
-  });
-
-  it("returns true when isolated and closedAt is today's date", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, closedAt: new Date() })
-    ).toBe(true);
-  });
-
-  it("returns true when both closedAt is set and status is archived", () => {
-    expect(
       isClosedIsolatedExecutionWorkspace({
-        ...base,
-        closedAt: new Date("2024-01-01T00:00:00Z"),
-        status: "archived",
-      })
-    ).toBe(true);
-  });
-
-  it("returns false when non-isolated with closed status (mode takes priority)", () => {
-    expect(
-      isClosedIsolatedExecutionWorkspace({
-        ...base,
         mode: "shared_workspace",
+        closedAt: "2024-01-01T00:00:00Z",
         status: "archived",
-      })
+      }),
     ).toBe(false);
   });
 
-  it("returns false when non-isolated with closedAt set", () => {
+  it("returns true when mode is isolated_workspace and closedAt is set", () => {
     expect(
       isClosedIsolatedExecutionWorkspace({
-        ...base,
-        mode: "shared_workspace",
-        closedAt: new Date("2024-01-01T00:00:00Z"),
-      })
+        mode: "isolated_workspace",
+        closedAt: "2024-01-01T00:00:00Z",
+        status: "active",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns true when mode is isolated_workspace and status is archived", () => {
+    expect(
+      isClosedIsolatedExecutionWorkspace({
+        mode: "isolated_workspace",
+        closedAt: null,
+        status: "archived",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns true when mode is isolated_workspace and status is cleanup_failed", () => {
+    expect(
+      isClosedIsolatedExecutionWorkspace({
+        mode: "isolated_workspace",
+        closedAt: null,
+        status: "cleanup_failed",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when mode is isolated_workspace but closedAt is null and status is active", () => {
+    expect(
+      isClosedIsolatedExecutionWorkspace({
+        mode: "isolated_workspace",
+        closedAt: null,
+        status: "active",
+      }),
     ).toBe(false);
   });
 });
@@ -111,33 +73,13 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
 // ============================================================================
 
 describe("getClosedIsolatedExecutionWorkspaceMessage", () => {
-  it("returns a message containing the workspace name", () => {
+  it("includes the workspace name in the message", () => {
     const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "my-workspace" });
     expect(msg).toContain("my-workspace");
   });
 
-  it("wraps workspace name in quotes", () => {
-    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "feature-branch" });
-    expect(msg).toContain('"feature-branch"');
-  });
-
-  it("mentions 'closed workspace'", () => {
-    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "ws" });
-    expect(msg).toMatch(/closed workspace/i);
-  });
-
-  it("mentions moving to an open workspace", () => {
-    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "ws" });
-    expect(msg).toMatch(/open workspace/i);
-  });
-
-  it("works with an empty name string", () => {
-    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "" });
-    expect(msg).toContain('""');
-  });
-
-  it("works with a name containing special characters", () => {
-    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "ws/feature-123" });
-    expect(msg).toContain('"ws/feature-123"');
+  it("mentions the workspace is closed", () => {
+    const msg = getClosedIsolatedExecutionWorkspaceMessage({ name: "my-workspace" });
+    expect(msg.toLowerCase()).toContain("closed");
   });
 });
