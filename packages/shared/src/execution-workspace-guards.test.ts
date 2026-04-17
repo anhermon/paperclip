@@ -21,7 +21,7 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
     expect(
       isClosedIsolatedExecutionWorkspace({
         mode: "shared_workspace",
-        closedAt: "2024-01-01T00:00:00Z",
+        closedAt: new Date("2024-01-01T00:00:00Z"),
         status: "archived",
       }),
     ).toBe(false);
@@ -31,7 +31,7 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
     expect(
       isClosedIsolatedExecutionWorkspace({
         mode: "isolated_workspace",
-        closedAt: "2024-01-01T00:00:00Z",
+        closedAt: new Date("2024-01-01T00:00:00Z"),
         status: "active",
       }),
     ).toBe(true);
