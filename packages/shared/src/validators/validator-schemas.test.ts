@@ -295,7 +295,7 @@ describe("createRoutineTriggerSchema", () => {
       cronExpression: "0 9 * * MON",
     });
     expect(result.success).toBe(true);
-    if (result.success) {
+    if (result.success && result.data.kind === "schedule") {
       expect(result.data.timezone).toBe("UTC");
     }
   });
