@@ -63,13 +63,13 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
     ).toBe(true);
   });
 
-  it("returns true when isolated and closedAt is a date string", () => {
+  it("returns true when isolated and closedAt is a Date object", () => {
     expect(
-      isClosedIsolatedExecutionWorkspace({ ...base, closedAt: "2024-01-01T00:00:00Z" })
+      isClosedIsolatedExecutionWorkspace({ ...base, closedAt: new Date("2024-01-01T00:00:00Z") })
     ).toBe(true);
   });
 
-  it("returns true when isolated and closedAt is a Date object", () => {
+  it("returns true when isolated and closedAt is today's date", () => {
     expect(
       isClosedIsolatedExecutionWorkspace({ ...base, closedAt: new Date() })
     ).toBe(true);
@@ -79,7 +79,7 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
     expect(
       isClosedIsolatedExecutionWorkspace({
         ...base,
-        closedAt: "2024-01-01T00:00:00Z",
+        closedAt: new Date("2024-01-01T00:00:00Z"),
         status: "archived",
       })
     ).toBe(true);
@@ -100,7 +100,7 @@ describe("isClosedIsolatedExecutionWorkspace", () => {
       isClosedIsolatedExecutionWorkspace({
         ...base,
         mode: "shared_workspace",
-        closedAt: "2024-01-01T00:00:00Z",
+        closedAt: new Date("2024-01-01T00:00:00Z"),
       })
     ).toBe(false);
   });
