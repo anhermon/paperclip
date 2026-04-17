@@ -29,7 +29,7 @@ export const DEFAULT_ALLOWED_TYPES: readonly string[] = [
   "text/html",
 ];
 
-export const DEFAULT_ATTACHMENT_CONTENT_TYPE = "application/octet-stream";
+const DEFAULT_ATTACHMENT_CONTENT_TYPE = "application/octet-stream";
 export const SVG_CONTENT_TYPE = "image/svg+xml";
 export const INLINE_ATTACHMENT_TYPES: readonly string[] = [
   "image/*",

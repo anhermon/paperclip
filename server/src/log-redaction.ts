@@ -1,6 +1,6 @@
 import os from "node:os";
 
-export const CURRENT_USER_REDACTION_TOKEN = "*";
+const CURRENT_USER_REDACTION_TOKEN = "*";
 
 export interface CurrentUserRedactionOptions {
   enabled?: boolean;
