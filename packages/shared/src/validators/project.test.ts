@@ -95,7 +95,7 @@ describe("createProjectSchema", () => {
   });
 
   it("accepts valid status values", () => {
-    for (const status of ["backlog", "active", "completed", "archived"]) {
+    for (const status of ["backlog", "planned", "in_progress", "completed", "cancelled"]) {
       expect(createProjectSchema.safeParse({ name: "P", status }).success).toBe(true);
     }
   });
@@ -131,7 +131,7 @@ describe("updateProjectSchema", () => {
   });
 
   it("accepts partial updates", () => {
-    expect(updateProjectSchema.safeParse({ name: "New Name", status: "active" }).success).toBe(true);
+    expect(updateProjectSchema.safeParse({ name: "New Name", status: "in_progress" }).success).toBe(true);
   });
 });
 
