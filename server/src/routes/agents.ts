@@ -2146,8 +2146,9 @@ export function agentRoutes(db: Db) {
         agentId: agent.id,
         invocationSource: "local_cli",
         triggerDetail: "local-cli session",
-        status: "running",
+        status: "completed",
         startedAt: now,
+        finishedAt: now,
         createdAt: now,
         updatedAt: now,
       })
