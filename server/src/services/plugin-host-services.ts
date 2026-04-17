@@ -13,7 +13,7 @@ import type {
   PluginEventType,
   EventFilter,
 } from "@paperclipai/plugin-sdk";
-import type { GoalLevel, GoalStatus } from "@paperclipai/shared";
+import type { GoalLevel, GoalStatus, PluginStateScopeKind } from "@paperclipai/shared";
 import { companyService } from "./companies.js";
 import { agentService } from "./agents.js";
 import { projectService } from "./projects.js";
@@ -526,14 +526,14 @@ export function buildHostServices(
 
     state: {
       async get(params) {
-        return stateStore.get(pluginId, params.scopeKind, params.stateKey, {
+        return stateStore.get(pluginId, params.scopeKind as PluginStateScopeKind, params.stateKey, {
           scopeId: params.scopeId,
           namespace: params.namespace,
         });
       },
       async set(params) {
         await stateStore.set(pluginId, {
-          scopeKind: params.scopeKind,
+          scopeKind: params.scopeKind as PluginStateScopeKind,
           scopeId: params.scopeId,
           namespace: params.namespace,
           stateKey: params.stateKey,
@@ -541,7 +541,7 @@ export function buildHostServices(
         });
       },
       async delete(params) {
-        await stateStore.delete(pluginId, params.scopeKind, params.stateKey, {
+        await stateStore.delete(pluginId, params.scopeKind as PluginStateScopeKind, params.stateKey, {
           scopeId: params.scopeId,
           namespace: params.namespace,
         });
