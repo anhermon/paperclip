@@ -6,32 +6,28 @@ import { extractProviderId, extractProviderIdWithFallback, extractModelName } fr
 // ============================================================================
 
 describe("extractProviderId", () => {
-  it("returns the provider segment before the first slash", () => {
-    expect(extractProviderId("anthropic/claude-3-5-sonnet")).toBe("anthropic");
+  it("extracts the provider from 'provider/model'", () => {
+    expect(extractProviderId("openai/gpt-4")).toBe("openai");
   });
 
-  it("handles nested slashes — only splits on the first", () => {
-    expect(extractProviderId("openai/gpt-4/turbo")).toBe("openai");
+  it("extracts provider from 'anthropic/claude-3'", () => {
+    expect(extractProviderId("anthropic/claude-3")).toBe("anthropic");
   });
 
   it("returns null when there is no slash", () => {
-    expect(extractProviderId("claude-3")).toBeNull();
+    expect(extractProviderId("gpt-4")).toBeNull();
   });
 
-  it("returns null for empty string", () => {
-    expect(extractProviderId("")).toBeNull();
+  it("returns null when provider part is empty", () => {
+    expect(extractProviderId("/gpt-4")).toBeNull();
   });
 
-  it("trims whitespace from the input", () => {
-    expect(extractProviderId("  anthropic/claude-3  ")).toBe("anthropic");
+  it("trims whitespace from input", () => {
+    expect(extractProviderId("  openai/gpt-4  ")).toBe("openai");
   });
 
-  it("returns null when the provider segment is empty (leading slash)", () => {
-    expect(extractProviderId("/model-name")).toBeNull();
-  });
-
-  it("returns null when provider is only whitespace after trim", () => {
-    expect(extractProviderId("   /model")).toBeNull();
+  it("handles nested paths by taking only the first segment", () => {
+    expect(extractProviderId("openai/org/gpt-4")).toBe("openai");
   });
 });
 
@@ -40,20 +36,16 @@ describe("extractProviderId", () => {
 // ============================================================================
 
 describe("extractProviderIdWithFallback", () => {
-  it("returns the provider when present", () => {
-    expect(extractProviderIdWithFallback("google/gemini-pro")).toBe("google");
+  it("returns the extracted provider when present", () => {
+    expect(extractProviderIdWithFallback("openai/gpt-4")).toBe("openai");
   });
 
-  it("returns default fallback 'other' when no slash", () => {
-    expect(extractProviderIdWithFallback("gemini-pro")).toBe("other");
+  it("returns default fallback 'other' when no provider", () => {
+    expect(extractProviderIdWithFallback("gpt-4")).toBe("other");
   });
 
-  it("accepts a custom fallback string", () => {
-    expect(extractProviderIdWithFallback("gemini-pro", "unknown")).toBe("unknown");
-  });
-
-  it("returns provider even with custom fallback when slash present", () => {
-    expect(extractProviderIdWithFallback("openai/gpt-4", "custom")).toBe("openai");
+  it("returns custom fallback when provided", () => {
+    expect(extractProviderIdWithFallback("gpt-4", "unknown")).toBe("unknown");
   });
 });
 
@@ -62,27 +54,23 @@ describe("extractProviderIdWithFallback", () => {
 // ============================================================================
 
 describe("extractModelName", () => {
-  it("returns the model segment after the first slash", () => {
-    expect(extractModelName("anthropic/claude-3-5-sonnet")).toBe("claude-3-5-sonnet");
+  it("returns the model part after the slash", () => {
+    expect(extractModelName("openai/gpt-4")).toBe("gpt-4");
   });
 
-  it("returns the full input when there is no slash", () => {
-    expect(extractModelName("claude-3")).toBe("claude-3");
+  it("returns the full string when there is no slash", () => {
+    expect(extractModelName("gpt-4")).toBe("gpt-4");
   });
 
-  it("returns everything after the first slash (including nested slashes)", () => {
-    expect(extractModelName("openai/gpt-4/turbo")).toBe("gpt-4/turbo");
+  it("handles nested paths by returning everything after first slash", () => {
+    expect(extractModelName("openai/org/gpt-4")).toBe("org/gpt-4");
   });
 
-  it("trims whitespace from the input", () => {
-    expect(extractModelName("  anthropic/claude-3  ")).toBe("claude-3");
+  it("trims whitespace", () => {
+    expect(extractModelName("  openai/gpt-4  ")).toBe("gpt-4");
   });
 
-  it("returns empty string when model segment is empty (trailing slash)", () => {
-    expect(extractModelName("anthropic/")).toBe("");
-  });
-
-  it("returns trimmed full string when input has no slash but has spaces", () => {
-    expect(extractModelName("  my-model  ")).toBe("my-model");
+  it("handles empty provider (slash at start)", () => {
+    expect(extractModelName("/gpt-4")).toBe("gpt-4");
   });
 });

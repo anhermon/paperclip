@@ -1,68 +1,108 @@
 import { describe, expect, it } from "vitest";
 import { isUuidLike, normalizeAgentUrlKey, deriveAgentUrlKey } from "./agent-url-key.js";
 
+// ============================================================================
+// isUuidLike
+// ============================================================================
+
 describe("isUuidLike", () => {
-  it("returns true for a valid v4 UUID", () => {
-    expect(isUuidLike("7f688d51-cf70-495b-806e-e672e7175da6")).toBe(true);
+  it("returns true for a valid UUID v4", () => {
+    expect(isUuidLike("550e8400-e29b-41d4-a716-446655440000")).toBe(true);
   });
 
-  it("returns true for uppercase UUID", () => {
-    expect(isUuidLike("7F688D51-CF70-495B-806E-E672E7175DA6")).toBe(true);
+  it("returns true for UUID with uppercase letters", () => {
+    expect(isUuidLike("550E8400-E29B-41D4-A716-446655440000")).toBe(true);
   });
 
-  it("returns false for non-UUID strings", () => {
-    expect(isUuidLike("not-a-uuid")).toBe(false);
-    expect(isUuidLike("12345")).toBe(false);
+  it("returns false for a plain string", () => {
+    expect(isUuidLike("my-agent")).toBe(false);
   });
 
-  it("returns false for null/undefined", () => {
+  it("returns false for null", () => {
     expect(isUuidLike(null)).toBe(false);
+  });
+
+  it("returns false for undefined", () => {
     expect(isUuidLike(undefined)).toBe(false);
   });
 
-  it("trims whitespace before checking", () => {
-    expect(isUuidLike("  7f688d51-cf70-495b-806e-e672e7175da6  ")).toBe(true);
+  it("returns false for empty string", () => {
+    expect(isUuidLike("")).toBe(false);
+  });
+
+  it("trims whitespace before testing", () => {
+    expect(isUuidLike("  550e8400-e29b-41d4-a716-446655440000  ")).toBe(true);
   });
 });
+
+// ============================================================================
+// normalizeAgentUrlKey
+// ============================================================================
 
 describe("normalizeAgentUrlKey", () => {
-  it("lowercases and replaces non-alphanumeric chars with hyphens", () => {
-    expect(normalizeAgentUrlKey("Dev Agent — Platform")).toBe("dev-agent-platform");
+  it("lowercases the input", () => {
+    expect(normalizeAgentUrlKey("MyAgent")).toBe("myagent");
   });
 
-  it("trims leading/trailing hyphens", () => {
-    expect(normalizeAgentUrlKey("--hello--")).toBe("hello");
+  it("replaces spaces with hyphens", () => {
+    expect(normalizeAgentUrlKey("my agent")).toBe("my-agent");
   });
 
-  it("returns null for empty or whitespace-only strings", () => {
-    expect(normalizeAgentUrlKey("")).toBe(null);
-    expect(normalizeAgentUrlKey("   ")).toBe(null);
+  it("replaces special characters with hyphens", () => {
+    expect(normalizeAgentUrlKey("agent@name!")).toBe("agent-name");
   });
 
-  it("returns null for null/undefined", () => {
-    expect(normalizeAgentUrlKey(null)).toBe(null);
-    expect(normalizeAgentUrlKey(undefined)).toBe(null);
+  it("collapses multiple delimiters into one hyphen", () => {
+    expect(normalizeAgentUrlKey("my  --  agent")).toBe("my-agent");
   });
 
-  it("collapses multiple delimiters into a single hyphen", () => {
-    expect(normalizeAgentUrlKey("a   b---c")).toBe("a-b-c");
+  it("strips leading and trailing hyphens", () => {
+    expect(normalizeAgentUrlKey("--agent--")).toBe("agent");
+  });
+
+  it("returns null for null input", () => {
+    expect(normalizeAgentUrlKey(null)).toBeNull();
+  });
+
+  it("returns null for undefined input", () => {
+    expect(normalizeAgentUrlKey(undefined)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(normalizeAgentUrlKey("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(normalizeAgentUrlKey("   ")).toBeNull();
+  });
+
+  it("preserves digits", () => {
+    expect(normalizeAgentUrlKey("agent-2")).toBe("agent-2");
   });
 });
 
+// ============================================================================
+// deriveAgentUrlKey
+// ============================================================================
+
 describe("deriveAgentUrlKey", () => {
-  it("derives from name when valid", () => {
-    expect(deriveAgentUrlKey("CTO")).toBe("cto");
+  it("returns normalized name when name is valid", () => {
+    expect(deriveAgentUrlKey("My Agent")).toBe("my-agent");
   });
 
-  it("falls back to fallback when name produces null", () => {
-    expect(deriveAgentUrlKey(null, "My Fallback")).toBe("my-fallback");
+  it("falls back to fallback when name is null", () => {
+    expect(deriveAgentUrlKey(null, "Fallback Agent")).toBe("fallback-agent");
+  });
+
+  it("falls back to fallback when name normalizes to empty", () => {
+    expect(deriveAgentUrlKey("---", "Fallback")).toBe("fallback");
   });
 
   it("returns 'agent' when both name and fallback are null", () => {
     expect(deriveAgentUrlKey(null, null)).toBe("agent");
   });
 
-  it("returns 'agent' when both name and fallback are empty", () => {
-    expect(deriveAgentUrlKey("", "")).toBe("agent");
+  it("returns 'agent' when both name and fallback are undefined", () => {
+    expect(deriveAgentUrlKey(undefined)).toBe("agent");
   });
 });

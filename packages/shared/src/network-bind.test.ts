@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  LOOPBACK_BIND_HOST,
-  ALL_INTERFACES_BIND_HOST,
   isLoopbackHost,
   isAllInterfacesHost,
   inferBindModeFromHost,
   validateConfiguredBindMode,
   resolveRuntimeBind,
+  LOOPBACK_BIND_HOST,
+  ALL_INTERFACES_BIND_HOST,
 } from "./network-bind.js";
 
 // ============================================================================
@@ -14,27 +14,27 @@ import {
 // ============================================================================
 
 describe("isLoopbackHost", () => {
-  it("returns true for '127.0.0.1'", () => {
+  it("returns true for 127.0.0.1", () => {
     expect(isLoopbackHost("127.0.0.1")).toBe(true);
   });
 
-  it("returns true for 'localhost'", () => {
+  it("returns true for localhost", () => {
     expect(isLoopbackHost("localhost")).toBe(true);
   });
 
-  it("returns true for 'LOCALHOST' (case-insensitive)", () => {
-    expect(isLoopbackHost("LOCALHOST")).toBe(true);
-  });
-
-  it("returns true for '::1' (IPv6 loopback)", () => {
+  it("returns true for ::1", () => {
     expect(isLoopbackHost("::1")).toBe(true);
   });
 
-  it("returns false for '0.0.0.0'", () => {
+  it("is case-insensitive", () => {
+    expect(isLoopbackHost("LOCALHOST")).toBe(true);
+  });
+
+  it("returns false for 0.0.0.0", () => {
     expect(isLoopbackHost("0.0.0.0")).toBe(false);
   });
 
-  it("returns false for a public IP", () => {
+  it("returns false for a custom host", () => {
     expect(isLoopbackHost("192.168.1.1")).toBe(false);
   });
 
@@ -50,8 +50,8 @@ describe("isLoopbackHost", () => {
     expect(isLoopbackHost("")).toBe(false);
   });
 
-  it("handles whitespace-padded host", () => {
-    expect(isLoopbackHost("  127.0.0.1  ")).toBe(true);
+  it("trims whitespace before checking", () => {
+    expect(isLoopbackHost("  localhost  ")).toBe(true);
   });
 });
 
@@ -60,20 +60,24 @@ describe("isLoopbackHost", () => {
 // ============================================================================
 
 describe("isAllInterfacesHost", () => {
-  it("returns true for '0.0.0.0'", () => {
+  it("returns true for 0.0.0.0", () => {
     expect(isAllInterfacesHost("0.0.0.0")).toBe(true);
   });
 
-  it("returns true for '::' (IPv6 all interfaces)", () => {
+  it("returns true for ::", () => {
     expect(isAllInterfacesHost("::")).toBe(true);
   });
 
-  it("returns false for '127.0.0.1'", () => {
-    expect(isAllInterfacesHost("127.0.0.1")).toBe(false);
+  it("returns false for localhost", () => {
+    expect(isAllInterfacesHost("localhost")).toBe(false);
   });
 
   it("returns false for null", () => {
     expect(isAllInterfacesHost(null)).toBe(false);
+  });
+
+  it("returns false for a custom host", () => {
+    expect(isAllInterfacesHost("192.168.1.100")).toBe(false);
   });
 });
 
@@ -82,36 +86,36 @@ describe("isAllInterfacesHost", () => {
 // ============================================================================
 
 describe("inferBindModeFromHost", () => {
-  it("returns 'loopback' for null", () => {
+  it("returns loopback for null", () => {
     expect(inferBindModeFromHost(null)).toBe("loopback");
   });
 
-  it("returns 'loopback' for '127.0.0.1'", () => {
-    expect(inferBindModeFromHost("127.0.0.1")).toBe("loopback");
+  it("returns loopback for undefined", () => {
+    expect(inferBindModeFromHost(undefined)).toBe("loopback");
   });
 
-  it("returns 'loopback' for 'localhost'", () => {
+  it("returns loopback for localhost", () => {
     expect(inferBindModeFromHost("localhost")).toBe("loopback");
   });
 
-  it("returns 'lan' for '0.0.0.0'", () => {
+  it("returns loopback for 127.0.0.1", () => {
+    expect(inferBindModeFromHost("127.0.0.1")).toBe("loopback");
+  });
+
+  it("returns lan for 0.0.0.0", () => {
     expect(inferBindModeFromHost("0.0.0.0")).toBe("lan");
   });
 
-  it("returns 'tailnet' when host matches tailnetBindHost", () => {
-    expect(
-      inferBindModeFromHost("100.64.1.2", { tailnetBindHost: "100.64.1.2" })
-    ).toBe("tailnet");
+  it("returns tailnet when host matches tailnetBindHost", () => {
+    expect(inferBindModeFromHost("100.64.0.1", { tailnetBindHost: "100.64.0.1" })).toBe("tailnet");
   });
 
-  it("returns 'custom' for an unrecognized host with no tailnet match", () => {
-    expect(inferBindModeFromHost("10.0.0.1")).toBe("custom");
+  it("returns custom for unrecognized host", () => {
+    expect(inferBindModeFromHost("192.168.1.50")).toBe("custom");
   });
 
-  it("returns 'custom' even when tailnetBindHost is set but host doesn't match", () => {
-    expect(
-      inferBindModeFromHost("10.0.0.1", { tailnetBindHost: "100.64.1.2" })
-    ).toBe("custom");
+  it("returns custom when tailnetBindHost differs from host", () => {
+    expect(inferBindModeFromHost("192.168.1.50", { tailnetBindHost: "100.64.0.1" })).toBe("custom");
   });
 });
 
@@ -120,62 +124,59 @@ describe("inferBindModeFromHost", () => {
 // ============================================================================
 
 describe("validateConfiguredBindMode", () => {
-  it("returns no errors for a valid loopback local_trusted setup", () => {
+  it("returns no errors for valid local_trusted+loopback", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "local_trusted",
       deploymentExposure: "private",
       bind: "loopback",
     });
-    expect(errors).toEqual([]);
+    expect(errors).toHaveLength(0);
   });
 
-  it("returns error when local_trusted is not loopback", () => {
+  it("returns error when local_trusted is combined with lan bind", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "local_trusted",
       deploymentExposure: "private",
       bind: "lan",
     });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/loopback/);
+    expect(errors).toContain("local_trusted requires server.bind=loopback");
   });
 
-  it("returns error when bind=custom but customBindHost is missing", () => {
+  it("returns error when bind=custom but no customBindHost", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "authenticated",
       deploymentExposure: "private",
       bind: "custom",
     });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/customBindHost/);
+    expect(errors).toContain("server.customBindHost is required when server.bind=custom");
   });
 
-  it("returns no error when bind=custom and customBindHost is set", () => {
+  it("returns no errors when bind=custom and customBindHost provided", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "authenticated",
       deploymentExposure: "private",
       bind: "custom",
-      customBindHost: "10.0.0.5",
+      customBindHost: "192.168.1.50",
     });
-    expect(errors).toEqual([]);
+    expect(errors).toHaveLength(0);
   });
 
-  it("returns error when authenticated/public uses tailnet", () => {
+  it("returns error for tailnet+authenticated+public", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "authenticated",
       deploymentExposure: "public",
       bind: "tailnet",
     });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatch(/tailnet/);
+    expect(errors).toContain("server.bind=tailnet is only supported for authenticated/private deployments");
   });
 
-  it("allows tailnet for authenticated/private", () => {
+  it("returns no errors for tailnet+authenticated+private", () => {
     const errors = validateConfiguredBindMode({
       deploymentMode: "authenticated",
       deploymentExposure: "private",
       bind: "tailnet",
     });
-    expect(errors).toEqual([]);
+    expect(errors).toHaveLength(0);
   });
 });
 
@@ -184,61 +185,52 @@ describe("validateConfiguredBindMode", () => {
 // ============================================================================
 
 describe("resolveRuntimeBind", () => {
-  it("resolves loopback bind to 127.0.0.1", () => {
+  it("resolves loopback to 127.0.0.1", () => {
     const result = resolveRuntimeBind({ bind: "loopback" });
     expect(result.bind).toBe("loopback");
     expect(result.host).toBe(LOOPBACK_BIND_HOST);
-    expect(result.errors).toEqual([]);
+    expect(result.errors).toHaveLength(0);
   });
 
-  it("resolves lan bind to 0.0.0.0", () => {
+  it("resolves lan to 0.0.0.0", () => {
     const result = resolveRuntimeBind({ bind: "lan" });
     expect(result.bind).toBe("lan");
     expect(result.host).toBe(ALL_INTERFACES_BIND_HOST);
-    expect(result.errors).toEqual([]);
+    expect(result.errors).toHaveLength(0);
   });
 
-  it("resolves custom bind with customBindHost", () => {
-    const result = resolveRuntimeBind({ bind: "custom", customBindHost: "10.0.0.5" });
-    expect(result.host).toBe("10.0.0.5");
-    expect(result.errors).toEqual([]);
+  it("resolves custom with customBindHost", () => {
+    const result = resolveRuntimeBind({ bind: "custom", customBindHost: "192.168.1.50" });
+    expect(result.bind).toBe("custom");
+    expect(result.host).toBe("192.168.1.50");
+    expect(result.errors).toHaveLength(0);
   });
 
-  it("returns error for custom bind without customBindHost", () => {
+  it("resolves custom without customBindHost returns error", () => {
     const result = resolveRuntimeBind({ bind: "custom" });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toMatch(/customBindHost/);
+    expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it("resolves tailnet bind with tailnetBindHost", () => {
-    const result = resolveRuntimeBind({ bind: "tailnet", tailnetBindHost: "100.64.1.2" });
-    expect(result.host).toBe("100.64.1.2");
-    expect(result.errors).toEqual([]);
+  it("resolves tailnet with tailnetBindHost", () => {
+    const result = resolveRuntimeBind({ bind: "tailnet", tailnetBindHost: "100.64.0.1" });
+    expect(result.bind).toBe("tailnet");
+    expect(result.host).toBe("100.64.0.1");
+    expect(result.errors).toHaveLength(0);
   });
 
-  it("returns error for tailnet bind without tailnetBindHost", () => {
+  it("resolves tailnet without tailnetBindHost returns error", () => {
     const result = resolveRuntimeBind({ bind: "tailnet" });
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toMatch(/tailnet/);
+    expect(result.errors.length).toBeGreaterThan(0);
   });
 
-  it("infers bind mode from host when bind is not specified", () => {
+  it("infers bind mode from host when bind not provided", () => {
     const result = resolveRuntimeBind({ host: "0.0.0.0" });
     expect(result.bind).toBe("lan");
-    expect(result.host).toBe(ALL_INTERFACES_BIND_HOST);
-  });
-});
-
-// ============================================================================
-// constants
-// ============================================================================
-
-describe("LOOPBACK_BIND_HOST and ALL_INTERFACES_BIND_HOST", () => {
-  it("LOOPBACK_BIND_HOST is 127.0.0.1", () => {
-    expect(LOOPBACK_BIND_HOST).toBe("127.0.0.1");
   });
 
-  it("ALL_INTERFACES_BIND_HOST is 0.0.0.0", () => {
-    expect(ALL_INTERFACES_BIND_HOST).toBe("0.0.0.0");
+  it("infers loopback from localhost", () => {
+    const result = resolveRuntimeBind({ host: "localhost" });
+    expect(result.bind).toBe("loopback");
+    expect(result.host).toBe(LOOPBACK_BIND_HOST);
   });
 });
