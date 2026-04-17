@@ -201,7 +201,7 @@ describe("buildExecutionPolicy", () => {
 
   it("preserves the mode from existing policy", () => {
     const existingPolicy: IssueExecutionPolicy = {
-      mode: "strict",
+      mode: "auto",
       commentRequired: true,
       stages: [],
     };
@@ -210,7 +210,7 @@ describe("buildExecutionPolicy", () => {
       reviewerValues: ["agent:agent-1"],
       approverValues: [],
     });
-    expect(result?.mode).toBe("strict");
+    expect(result?.mode).toBe("auto");
   });
 
   it("uses 'normal' mode when no existing policy", () => {

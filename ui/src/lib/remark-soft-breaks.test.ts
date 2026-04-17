@@ -9,7 +9,7 @@ import { remarkSoftBreaks } from "./remark-soft-breaks";
 
 type TextNode = { type: "text"; value: string };
 type BreakNode = { type: "break" };
-type ParentNode = { children: Array<TextNode | BreakNode | ParentNode> };
+type ParentNode = { type?: string; children: Array<TextNode | BreakNode | ParentNode> };
 
 function makeTree(children: Array<TextNode | BreakNode | ParentNode>): ParentNode {
   return { children };
