@@ -15,7 +15,7 @@ function assertBoard(req: Request) {
 
 export function adminRoutes(db: Db) {
   const router = Router();
-  const heartbeat = heartbeatService(db as any);
+  const heartbeat = heartbeatService(db);
 
   /**
    * Clear stale executionRunId/executionLockedAt locks on issues where the
