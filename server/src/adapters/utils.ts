@@ -4,14 +4,8 @@
 import type { ChildProcess } from "node:child_process";
 import { logger } from "../middleware/logger.js";
 import * as serverUtils from "@paperclipai/adapter-utils/server-utils";
-export type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
-
-type BuildInvocationEnvForLogsOptions = {
-  runtimeEnv?: NodeJS.ProcessEnv | Record<string, string>;
-  includeRuntimeKeys?: string[];
-  resolvedCommand?: string | null;
-  resolvedCommandEnvKey?: string;
-};
+import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
+export type { RunProcessResult };
 
 export const runningProcesses: Map<string, { child: ChildProcess; graceSec: number; processGroupId: number | null }> =
   serverUtils.runningProcesses;
@@ -33,46 +27,9 @@ export const ensurePathInEnv = serverUtils.ensurePathInEnv;
 export const ensureAbsoluteDirectory = serverUtils.ensureAbsoluteDirectory;
 export const ensureCommandResolvable = serverUtils.ensureCommandResolvable;
 export const resolveCommandForLogs = serverUtils.resolveCommandForLogs;
-
-/** Builds a sanitized copy of the invocation environment suitable for including in log output. */
-export function buildInvocationEnvForLogs(
-  env: Record<string, string>,
-  options: BuildInvocationEnvForLogsOptions = {},
-): Record<string, string> {
-  // TODO: Remove this fallback once @paperclipai/adapter-utils exports buildInvocationEnvForLogs everywhere we consume it.
-  const maybeBuildInvocationEnvForLogs = (
-    serverUtils as typeof serverUtils & {
-      buildInvocationEnvForLogs?: (
-        env: Record<string, string>,
-        options?: BuildInvocationEnvForLogsOptions,
-      ) => Record<string, string>;
-    }
-  ).buildInvocationEnvForLogs;
-
-  if (typeof maybeBuildInvocationEnvForLogs === "function") {
-    return maybeBuildInvocationEnvForLogs(env, options);
-  }
-
-  const merged: Record<string, string> = { ...env };
-  const runtimeEnv = options.runtimeEnv ?? {};
-
-  for (const key of options.includeRuntimeKeys ?? []) {
-    if (key in merged) continue;
-    const value = runtimeEnv[key];
-    if (typeof value !== "string" || value.length === 0) continue;
-    merged[key] = value;
-  }
-
-  const resolvedCommand = options.resolvedCommand?.trim();
-  if (resolvedCommand) {
-    merged[options.resolvedCommandEnvKey ?? "PAPERCLIP_RESOLVED_COMMAND"] = resolvedCommand;
-  }
-
-  return redactEnvForLogs(merged);
-}
+export const buildInvocationEnvForLogs = serverUtils.buildInvocationEnvForLogs;
 
 // Re-export runChildProcess with the server's pino logger wired in.
-import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
 const _runChildProcess = serverUtils.runChildProcess;
 
 export async function runChildProcess(
