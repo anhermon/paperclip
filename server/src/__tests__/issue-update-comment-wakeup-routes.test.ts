@@ -66,6 +66,7 @@ vi.mock("../services/index.js", () => ({
 
 function registerModuleMocks() {
   vi.doMock("../services/index.js", () => ({
+    agentPoliciesService: vi.fn(() => ({})),
     accessService: () => ({
       canUser: vi.fn(async () => true),
       hasPermission: vi.fn(async () => true),
@@ -77,6 +78,7 @@ function registerModuleMocks() {
         agent: { id: raw },
       })),
     }),
+    approvalService: () => ({}),
     documentService: () => ({}),
     executionWorkspaceService: () => ({}),
     feedbackService: () => ({
