@@ -40,7 +40,7 @@ function makeManifest(
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     source: null,
-    includes: {},
+    includes: { company: false, agents: false, projects: false, issues: false, skills: false },
     company: null,
     sidebar: null,
     agents: overrides.agents ?? [],
@@ -193,7 +193,7 @@ describe("generateReadme", () => {
   it("includes content count table rows for each non-empty section", () => {
     const manifest = makeManifest({
       agents: [makeAgent()],
-      projects: [{ name: "Proj A", slug: "proj-a", path: "projects/proj-a", description: null, goals: [] }],
+      projects: [{ name: "Proj A", slug: "proj-a", path: "projects/proj-a", description: null, ownerAgentSlug: null, leadAgentSlug: null, targetDate: null, color: null, status: null, env: null, executionWorkspacePolicy: null, workspaces: [], metadata: null }],
     });
     const result = generateReadme(manifest, opts);
     expect(result).toContain("| Agents | 1 |");
