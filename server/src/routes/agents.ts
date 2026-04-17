@@ -2144,11 +2144,10 @@ export function agentRoutes(db: Db) {
       .values({
         companyId: agent.companyId,
         agentId: agent.id,
-        invocationSource: "local_cli",
+        invocationSource: "on_demand",
         triggerDetail: "local-cli session",
-        status: "completed",
+        status: "running",
         startedAt: now,
-        finishedAt: now,
         createdAt: now,
         updatedAt: now,
       })
