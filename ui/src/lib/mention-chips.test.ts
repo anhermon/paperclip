@@ -56,7 +56,7 @@ describe("parseMentionChipHref — project mentions", () => {
     const result = parseMentionChipHref("project://project-id-456?color=ff5733");
     expect(result?.kind).toBe("project");
     if (result?.kind === "project") {
-      expect(result.color).toBe("ff5733");
+      expect(result.color).toBe("#ff5733");
     }
   });
 });
