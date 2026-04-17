@@ -18,6 +18,7 @@ const mockIssueService = vi.hoisted(() => ({
 }));
 
 vi.mock("../services/index.js", () => ({
+  agentPoliciesService: vi.fn(() => ({})),
   accessService: () => ({
     canUser: vi.fn(async () => true),
     hasPermission: vi.fn(async () => true),
@@ -25,6 +26,7 @@ vi.mock("../services/index.js", () => ({
   agentService: () => ({
     getById: vi.fn(async () => null),
   }),
+  approvalService: () => ({}),
   documentService: () => ({}),
   executionWorkspaceService: () => ({
     getById: vi.fn(async () => null),

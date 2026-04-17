@@ -31,8 +31,10 @@ vi.mock("../telemetry.js", () => ({
 }));
 
 vi.mock("../services/index.js", () => ({
+  agentPoliciesService: vi.fn(() => ({})),
   accessService: () => mockAccessService,
   agentService: () => ({ getById: vi.fn(async () => null) }),
+  approvalService: () => ({}),
   documentService: () => ({}),
   executionWorkspaceService: () => ({}),
   feedbackService: () => ({

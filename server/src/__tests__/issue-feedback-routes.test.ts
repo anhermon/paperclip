@@ -64,6 +64,7 @@ function registerModuleMocks() {
     agentPoliciesService: vi.fn(() => ({})),
     accessService: () => mockAccessService,
     agentService: () => mockAgentService,
+    approvalService: () => ({}),
     documentService: () => ({}),
     executionWorkspaceService: () => ({}),
     feedbackService: () => mockFeedbackService,
