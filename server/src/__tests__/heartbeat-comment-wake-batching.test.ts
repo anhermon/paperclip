@@ -225,6 +225,11 @@ describe("heartbeat comment wake batching", () => {
   }, 45_000);
 
   afterAll(async () => {
+    // End the db connection pool before stopping the embedded postgres instance.
+    // Without this, postgres.js has pending socket writes queued in Immediates
+    // that fire after the instance stops, producing an unhandled
+    // "Cannot read properties of null (reading 'write')" error.
+    await db.$client.end({ timeout: 5 });
     await instance?.stop();
     if (dataDir) {
       fs.rmSync(dataDir, { recursive: true, force: true });
