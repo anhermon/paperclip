@@ -5,7 +5,8 @@ dist/
 drizzle/meta/
 .vite/
 coverage/
-benchmarks/
+benchmarks/*.json
+benchmarks/results/
 .DS_Store
 data/
 .paperclip/

@@ -82,6 +82,7 @@ export interface IssueFilters {
   excludeRoutineExecutions?: boolean;
   q?: string;
   limit?: number;
+  updatedAfter?: Date | string;
 }
 
 type IssueRow = typeof issues.$inferSelect;
@@ -404,6 +405,7 @@ export function normalizeAgentMentionToken(raw: string): string {
   return s.trim();
 }
 
+/** Derives per-user context for an issue (unread state, last comment, etc.) for the given user ID. */
 export function deriveIssueUserContext(
   issue: IssueUserContextInput,
   userId: string,
@@ -583,6 +585,7 @@ function withActiveRuns(
   }));
 }
 
+/** Creates the issue service for managing issue CRUD, assignment, and activity. */
 export function issueService(db: Db) {
   const instanceSettings = instanceSettingsService(db);
 
@@ -1014,6 +1017,10 @@ export function issueService(db: Db) {
       if (filters?.parentId) conditions.push(eq(issues.parentId, filters.parentId));
       if (filters?.originKind) conditions.push(eq(issues.originKind, filters.originKind));
       if (filters?.originId) conditions.push(eq(issues.originId, filters.originId));
+      if (filters?.updatedAfter) {
+        const ts = filters.updatedAfter instanceof Date ? filters.updatedAfter : new Date(filters.updatedAfter);
+        conditions.push(gt(issues.updatedAt, ts));
+      }
       if (filters?.labelId) {
         const labeledIssueIds = await db
           .select({ issueId: issueLabels.issueId })

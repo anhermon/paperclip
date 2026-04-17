@@ -473,6 +473,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           },
         }
       : null;
+  // Prompt section order is optimised for Anthropic prompt-cache stability (5-min TTL).
+  // Static / semi-static sections must appear BEFORE dynamic ones so the longest
+  // possible prefix is cache-stable across heartbeats.
+  //   1. bootstrap_prompt  — static (config-time, empty on resumed sessions)
+  //   2. heartbeat_prompt  — semi-static (changes only when template is updated)
+  //   3. session_handoff   — per-session (changes between Claude sessions)
+  //   4. wake_prompt       — most volatile (new content every heartbeat)
   const assembled = assembleHeartbeatInvocation({
     context,
     promptFragments: [
@@ -484,11 +491,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         memoryClass: "procedural",
       },
       {
-        key: "wake_prompt",
-        title: "Wake prompt",
-        text: wakePrompt,
-        metricKey: "wakePromptChars",
-        memoryClass: "transient",
+        key: "heartbeat_prompt",
+        title: "Heartbeat prompt",
+        text: renderedPrompt,
+        metricKey: "heartbeatPromptChars",
+        memoryClass: "procedural",
       },
       {
         key: "session_handoff",
@@ -498,10 +505,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         memoryClass: "episodic",
       },
       {
-        key: "heartbeat_prompt",
-        title: "Heartbeat prompt",
-        text: renderedPrompt,
-        metricKey: "heartbeatPromptChars",
+        key: "wake_prompt",
+        title: "Wake prompt",
+        text: wakePrompt,
+        metricKey: "wakePromptChars",
         memoryClass: "transient",
       },
     ],
@@ -656,10 +663,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       parsedStream.usage ??
       (() => {
         const usageObj = parseObject(parsed.usage);
+        const cacheCreationInputTokens = asNumber(usageObj.cache_creation_input_tokens, 0);
         return {
           inputTokens: asNumber(usageObj.input_tokens, 0),
           cachedInputTokens: asNumber(usageObj.cache_read_input_tokens, 0),
           outputTokens: asNumber(usageObj.output_tokens, 0),
+          ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
         };
       })();
 
@@ -708,6 +717,30 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
+  const logCacheMetrics = async (result: AdapterExecutionResult) => {
+    const u = result.usage;
+    if (!u) return;
+    const readTokens = u.cachedInputTokens ?? 0;
+    const creationTokens = u.cacheCreationInputTokens ?? 0;
+    const inputTokens = u.inputTokens;
+    const totalCacheableTokens = readTokens + creationTokens;
+    const hitRate =
+      totalCacheableTokens > 0 ? ((readTokens / totalCacheableTokens) * 100).toFixed(1) : null;
+    // Billable ratio: effective cost vs full-price cost (cache reads at 10%, creation at 125%)
+    const effectiveCost = inputTokens + readTokens * 0.1 + creationTokens * 1.25;
+    const fullCost = inputTokens + readTokens + creationTokens;
+    const billableRatio = fullCost > 0 ? ((effectiveCost / fullCost) * 100).toFixed(1) : null;
+    const parts = [
+      `input=${inputTokens}`,
+      `cache_read=${readTokens}`,
+      `cache_creation=${creationTokens}`,
+      `output=${u.outputTokens}`,
+    ];
+    if (hitRate !== null) parts.push(`hit_rate=${hitRate}%`);
+    if (billableRatio !== null) parts.push(`billable_ratio=${billableRatio}%`);
+    await onLog("stdout", `[paperclip-cache] ${parts.join(" ")}\n`);
+  };
+
   const initial = await runAttempt(sessionId ?? null);
   if (
     sessionId &&
@@ -721,8 +754,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[paperclip] Claude resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
     );
     const retry = await runAttempt(null);
-    return toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+    const retryResult = toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+    await logCacheMetrics(retryResult);
+    return retryResult;
   }
 
-  return toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+  const result = toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+  await logCacheMetrics(result);
+  return result;
 }

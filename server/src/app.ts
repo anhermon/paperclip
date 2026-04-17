@@ -77,6 +77,7 @@ const VITE_DEV_STATIC_PATHS = new Set([
   "/sw.js",
 ]);
 
+/** Derives a Vite HMR websocket port offset from the server port, staying within valid port range. */
 export function resolveViteHmrPort(serverPort: number): number {
   if (serverPort <= 55_535) {
     return serverPort + 10_000;

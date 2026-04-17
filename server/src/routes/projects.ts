@@ -30,6 +30,7 @@ import {
 import { assertCanManageProjectWorkspaceRuntimeServices } from "./workspace-runtime-service-authz.js";
 import { getTelemetryClient } from "../telemetry.js";
 
+/** Creates the Express router for project and workspace management endpoints. */
 export function projectRoutes(db: Db) {
   const router = Router();
   const svc = projectService(db);

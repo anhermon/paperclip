@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@paperclipai/db";
-import { issueExecutionDecisions } from "@paperclipai/db";
+import { approvals as approvalsTable, issueApprovals, issueComments, issueExecutionDecisions, issues } from "@paperclipai/db";
 import {
   addIssueCommentSchema,
   createIssueAttachmentMetadataSchema,
@@ -16,6 +17,7 @@ import {
   feedbackVoteValueSchema,
   upsertIssueFeedbackVoteSchema,
   linkIssueApprovalSchema,
+  requestIssueApprovalSchema,
   issueDocumentKeySchema,
   restoreIssueDocumentRevisionSchema,
   updateIssueWorkProductSchema,
@@ -32,6 +34,7 @@ import { validate } from "../middleware/validate.js";
 import {
   accessService,
   agentService,
+  approvalService,
   executionWorkspaceService,
   feedbackService,
   goalService,
@@ -287,6 +290,7 @@ function buildExecutionStageWakeup(input: {
   return null;
 }
 
+/** Creates the Express router for issue CRUD and workflow endpoints. */
 export function issueRoutes(
   db: Db,
   storage: StorageService,
@@ -311,6 +315,7 @@ export function issueRoutes(
   const projectsSvc = projectService(db);
   const goalsSvc = goalService(db);
   const issueApprovalsSvc = issueApprovalService(db);
+  const approvalsSvc = approvalService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const workProductsSvc = workProductService(db);
   const documentsSvc = documentService(db);
@@ -1338,6 +1343,84 @@ export function issueRoutes(
     });
 
     res.json({ ok: true });
+  });
+
+  router.post("/issues/:id/request-approval", validate(requestIssueApprovalSchema), async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    if (!(await assertCanManageIssueApprovalLinks(req, res, issue.companyId))) return;
+
+    const actor = getActorInfo(req);
+    const { type, payload, comment: commentBody, requestedByAgentId } = req.body;
+
+    const { approval, comment } = await db.transaction(async (tx) => {
+      const [newApproval] = await tx
+        .insert(approvalsTable)
+        .values({
+          companyId: issue.companyId,
+          type,
+          payload,
+          requestedByAgentId: requestedByAgentId ?? actor.agentId ?? null,
+          requestedByUserId: actor.actorType === "user" ? actor.actorId : null,
+          status: "pending",
+          decisionNote: null,
+          decidedByUserId: null,
+          decidedAt: null,
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      await tx
+        .insert(issueApprovals)
+        .values({
+          companyId: issue.companyId,
+          issueId: id,
+          approvalId: newApproval.id,
+          linkedByAgentId: actor.agentId ?? null,
+          linkedByUserId: actor.actorType === "user" ? actor.actorId : null,
+        })
+        .onConflictDoNothing();
+
+      await svc.update(id, { status: "blocked", actorAgentId: actor.agentId ?? null, actorUserId: actor.actorType === "user" ? actor.actorId : null }, tx);
+
+      const [newComment] = await tx
+        .insert(issueComments)
+        .values({
+          companyId: issue.companyId,
+          issueId: id,
+          authorAgentId: actor.agentId ?? null,
+          authorUserId: actor.actorType === "user" ? actor.actorId : null,
+          createdByRunId: actor.runId ?? null,
+          body: commentBody,
+        })
+        .returning();
+
+      await tx
+        .update(issues)
+        .set({ updatedAt: new Date() })
+        .where(eq(issues.id, id));
+
+      return { approval: newApproval, comment: newComment };
+    });
+
+    await logActivity(db, {
+      companyId: issue.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "approval.created",
+      entityType: "approval",
+      entityId: approval.id,
+      details: { type: approval.type, issueIds: [id] },
+    });
+
+    res.status(201).json({ approval, comment });
   });
 
   router.post("/companies/:companyId/issues", validate(createIssueSchema), async (req, res) => {
