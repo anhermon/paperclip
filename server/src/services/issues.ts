@@ -403,6 +403,7 @@ export function normalizeAgentMentionToken(raw: string): string {
   return s.trim();
 }
 
+/** Derives per-user context for an issue (unread state, last comment, etc.) for the given user ID. */
 export function deriveIssueUserContext(
   issue: IssueUserContextInput,
   userId: string,
@@ -537,6 +538,7 @@ function withActiveRuns(
   }));
 }
 
+/** Creates the issue service for managing issue CRUD, assignment, and activity. */
 export function issueService(db: Db) {
   const instanceSettings = instanceSettingsService(db);
 
