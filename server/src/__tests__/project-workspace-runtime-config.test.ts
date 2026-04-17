@@ -37,14 +37,14 @@ describe("readProjectWorkspaceRuntimeConfig", () => {
     const result = readProjectWorkspaceRuntimeConfig({
       runtimeConfig: { desiredState: "running" },
     });
-    expect(result).toEqual({ workspaceRuntime: null, desiredState: "running" });
+    expect(result).toEqual({ workspaceRuntime: null, desiredState: "running", serviceStates: null });
   });
 
   it("returns config with desiredState='stopped' when set", () => {
     const result = readProjectWorkspaceRuntimeConfig({
       runtimeConfig: { desiredState: "stopped" },
     });
-    expect(result).toEqual({ workspaceRuntime: null, desiredState: "stopped" });
+    expect(result).toEqual({ workspaceRuntime: null, desiredState: "stopped", serviceStates: null });
   });
 
   it("normalises unknown desiredState values to null", () => {
@@ -59,7 +59,7 @@ describe("readProjectWorkspaceRuntimeConfig", () => {
     const result = readProjectWorkspaceRuntimeConfig({
       runtimeConfig: { workspaceRuntime: { port: 3000 } },
     });
-    expect(result).toEqual({ workspaceRuntime: { port: 3000 }, desiredState: null });
+    expect(result).toEqual({ workspaceRuntime: { port: 3000 }, desiredState: null, serviceStates: null });
   });
 
   it("clones the workspaceRuntime object (does not share reference)", () => {
@@ -84,7 +84,7 @@ describe("readProjectWorkspaceRuntimeConfig", () => {
     const result = readProjectWorkspaceRuntimeConfig({
       runtimeConfig: { workspaceRuntime: { a: 1 }, desiredState: "running" },
     });
-    expect(result).toEqual({ workspaceRuntime: { a: 1 }, desiredState: "running" });
+    expect(result).toEqual({ workspaceRuntime: { a: 1 }, desiredState: "running", serviceStates: null });
   });
 });
 
