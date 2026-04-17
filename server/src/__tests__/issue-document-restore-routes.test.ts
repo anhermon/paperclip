@@ -43,6 +43,7 @@ vi.mock("../services/index.js", () => ({
     getExperimental: vi.fn(async () => ({})),
     getGeneral: vi.fn(async () => ({ feedbackDataSharingPreference: "prompt" })),
   }),
+  approvalService: () => ({}),
   issueApprovalService: () => ({}),
   issueService: () => mockIssueService,
   logActivity: mockLogActivity,
