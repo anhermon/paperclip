@@ -4,7 +4,8 @@
 import type { ChildProcess } from "node:child_process";
 import { logger } from "../middleware/logger.js";
 import * as serverUtils from "@paperclipai/adapter-utils/server-utils";
-export type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
+import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
+export type { RunProcessResult };
 
 export const runningProcesses: Map<string, { child: ChildProcess; graceSec: number; processGroupId: number | null }> =
   serverUtils.runningProcesses;
