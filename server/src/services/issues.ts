@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   activityLog,
@@ -970,7 +970,7 @@ export function issueService(db: Db) {
       if (filters?.originId) conditions.push(eq(issues.originId, filters.originId));
       if (filters?.updatedAfter) {
         const ts = filters.updatedAfter instanceof Date ? filters.updatedAfter : new Date(filters.updatedAfter);
-        conditions.push(gte(issues.updatedAt, ts));
+        conditions.push(gt(issues.updatedAt, ts));
       }
       if (filters?.labelId) {
         const labeledIssueIds = await db
