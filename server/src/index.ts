@@ -214,7 +214,6 @@ export async function startServer(): Promise<StartedServer> {
     if (!existingUser) {
       await db.insert(authUsers).values({
         id: LOCAL_BOARD_USER_ID,
-        clerkId: "local-board-clerk-id",
         name: LOCAL_BOARD_USER_NAME,
         email: LOCAL_BOARD_USER_EMAIL,
         emailVerified: true,
