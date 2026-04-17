@@ -1,5 +1,5 @@
 import type { Db } from "@paperclipai/db";
-import { pluginLogs, agentTaskSessions as agentTaskSessionsTable } from "@paperclipai/db";
+import { pluginLogs, agentTaskSessions as agentTaskSessionsTable, goals as goalsTable } from "@paperclipai/db";
 import { eq, and, like, desc } from "drizzle-orm";
 import type {
   HostServices,
@@ -10,7 +10,10 @@ import type {
   Goal,
   PluginWorkspace,
   IssueComment,
+  PluginEventType,
+  EventFilter,
 } from "@paperclipai/plugin-sdk";
+import type { GoalLevel, GoalStatus } from "@paperclipai/shared";
 import { companyService } from "./companies.js";
 import { agentService } from "./agents.js";
 import { projectService } from "./projects.js";
@@ -522,14 +525,14 @@ export function buildHostServices(
 
     state: {
       async get(params) {
-        return stateStore.get(pluginId, params.scopeKind as any, params.stateKey, {
+        return stateStore.get(pluginId, params.scopeKind, params.stateKey, {
           scopeId: params.scopeId,
           namespace: params.namespace,
         });
       },
       async set(params) {
         await stateStore.set(pluginId, {
-          scopeKind: params.scopeKind as any,
+          scopeKind: params.scopeKind,
           scopeId: params.scopeId,
           namespace: params.namespace,
           stateKey: params.stateKey,
@@ -537,7 +540,7 @@ export function buildHostServices(
         });
       },
       async delete(params) {
-        await stateStore.delete(pluginId, params.scopeKind as any, params.stateKey, {
+        await stateStore.delete(pluginId, params.scopeKind, params.stateKey, {
           scopeId: params.scopeId,
           namespace: params.namespace,
         });
@@ -546,10 +549,10 @@ export function buildHostServices(
 
     entities: {
       async upsert(params) {
-        return registry.upsertEntity(pluginId, params as any) as any;
+        return registry.upsertEntity(pluginId, params) as any;
       },
       async list(params) {
-        return registry.listEntities(pluginId, params as any) as any;
+        return registry.listEntities(pluginId, params) as any;
       },
     },
 
@@ -567,9 +570,9 @@ export function buildHostServices(
           }
         };
         if (params.filter) {
-          scopedBus.subscribe(params.eventPattern as any, params.filter as any, handler);
+          scopedBus.subscribe(params.eventPattern as PluginEventType | `plugin.${string}`, params.filter as EventFilter, handler);
         } else {
-          scopedBus.subscribe(params.eventPattern as any, handler);
+          scopedBus.subscribe(params.eventPattern as PluginEventType | `plugin.${string}`, handler);
         }
       },
     },
@@ -775,7 +778,7 @@ export function buildHostServices(
       async list(params) {
         const companyId = ensureCompanyId(params.companyId);
         await ensurePluginAvailableForCompany(companyId);
-        return applyWindow((await issues.list(companyId, params as any)) as Issue[], params);
+        return applyWindow((await issues.list(companyId, params)) as Issue[], params);
       },
       async get(params) {
         const companyId = ensureCompanyId(params.companyId);
@@ -922,8 +925,8 @@ export function buildHostServices(
         return (await goals.create(companyId, {
           title: params.title,
           description: params.description,
-          level: params.level as any,
-          status: params.status as any,
+          level: params.level as GoalLevel,
+          status: params.status as GoalStatus,
           parentId: params.parentId,
           ownerAgentId: params.ownerAgentId,
         })) as Goal;
@@ -932,7 +935,7 @@ export function buildHostServices(
         const companyId = ensureCompanyId(params.companyId);
         await ensurePluginAvailableForCompany(companyId);
         requireInCompany("Goal", await goals.getById(params.goalId), companyId);
-        return (await goals.update(params.goalId, params.patch as any)) as Goal;
+        return (await goals.update(params.goalId, params.patch as Partial<typeof goalsTable.$inferInsert>)) as Goal;
       },
     },
 
