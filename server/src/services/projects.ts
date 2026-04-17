@@ -339,6 +339,7 @@ function deriveWorkspaceName(input: {
   return "Workspace";
 }
 
+/** Resolves a unique URL-safe project shortname, appending a numeric suffix if the requested name collides. */
 export function resolveProjectNameForUniqueShortname(
   requestedName: string,
   existingProjects: ProjectShortnameRow[],
@@ -399,6 +400,7 @@ async function ensureSinglePrimaryWorkspace(
     );
 }
 
+/** Creates the project service for managing projects, workspaces, and associated resources. */
 export function projectService(db: Db) {
   return {
     list: async (companyId: string): Promise<ProjectWithGoals[]> => {
