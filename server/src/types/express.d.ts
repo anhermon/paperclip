@@ -1,5 +1,3 @@
-import type { ErrorContext } from "../middleware/error-handler.js";
-
 export {};
 
 declare global {
@@ -16,12 +14,17 @@ declare global {
         runId?: string;
         source?: "local_implicit" | "session" | "board_key" | "agent_key" | "agent_jwt" | "none";
       };
-      /** Express router attaches the matched route here after routing. */
-      route?: { path: string };
     }
     interface Response {
       /** Error context attached by the error handler for structured logging. */
-      __errorContext?: ErrorContext;
+      __errorContext?: {
+        error: { message: string; stack?: string; name?: string; details?: unknown; raw?: unknown };
+        method: string;
+        url: string;
+        reqBody?: unknown;
+        reqParams?: unknown;
+        reqQuery?: unknown;
+      };
       /** Raw error object attached by the error handler for pino-http access. */
       err?: Error;
     }
