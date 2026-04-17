@@ -45,7 +45,7 @@ describe("createCostEventSchema", () => {
       heartbeatRunId: "00000000-0000-0000-0000-000000000005",
       billingCode: "B-001",
       biller: "custom",
-      billingType: "token_based",
+      billingType: "metered_api",
       inputTokens: 100,
       cachedInputTokens: 20,
       outputTokens: 50,
