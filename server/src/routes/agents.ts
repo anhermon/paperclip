@@ -2128,6 +2128,51 @@ export function agentRoutes(db: Db) {
     res.json({ ok: true });
   });
 
+  router.post("/agents/:id/runs", async (req, res) => {
+    assertBoard(req);
+    const id = req.params.id as string;
+    const agent = await svc.getById(id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    assertCompanyAccess(req, agent.companyId);
+
+    const now = new Date();
+    const run = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: agent.companyId,
+        agentId: agent.id,
+        invocationSource: "local_cli",
+        triggerDetail: "local-cli session",
+        status: "running",
+        startedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .then((rows) => rows[0]);
+
+    await logActivity(db, {
+      companyId: agent.companyId,
+      actorType: "user",
+      actorId: req.actor.userId ?? "board",
+      action: "agent.run_registered",
+      entityType: "agent",
+      entityId: agent.id,
+      details: { runId: run.id, source: "local_cli" },
+    });
+
+    res.status(201).json({
+      id: run.id,
+      agentId: run.agentId,
+      companyId: run.companyId,
+      status: run.status,
+      createdAt: run.createdAt,
+    });
+  });
+
   router.post("/agents/:id/wakeup", validate(wakeAgentSchema), async (req, res) => {
     const id = req.params.id as string;
     const agent = await svc.getById(id);
