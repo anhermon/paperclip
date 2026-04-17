@@ -663,10 +663,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       parsedStream.usage ??
       (() => {
         const usageObj = parseObject(parsed.usage);
+        const cacheCreationInputTokens = asNumber(usageObj.cache_creation_input_tokens, 0);
         return {
           inputTokens: asNumber(usageObj.input_tokens, 0),
           cachedInputTokens: asNumber(usageObj.cache_read_input_tokens, 0),
           outputTokens: asNumber(usageObj.output_tokens, 0),
+          ...(cacheCreationInputTokens > 0 ? { cacheCreationInputTokens } : {}),
         };
       })();
 
@@ -715,6 +717,30 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
+  const logCacheMetrics = async (result: AdapterExecutionResult) => {
+    const u = result.usage;
+    if (!u) return;
+    const readTokens = u.cachedInputTokens ?? 0;
+    const creationTokens = u.cacheCreationInputTokens ?? 0;
+    const inputTokens = u.inputTokens;
+    const totalCacheableTokens = readTokens + creationTokens;
+    const hitRate =
+      totalCacheableTokens > 0 ? ((readTokens / totalCacheableTokens) * 100).toFixed(1) : null;
+    // Billable ratio: effective cost vs full-price cost (cache reads at 10%, creation at 125%)
+    const effectiveCost = inputTokens + readTokens * 0.1 + creationTokens * 1.25;
+    const fullCost = inputTokens + readTokens + creationTokens;
+    const billableRatio = fullCost > 0 ? ((effectiveCost / fullCost) * 100).toFixed(1) : null;
+    const parts = [
+      `input=${inputTokens}`,
+      `cache_read=${readTokens}`,
+      `cache_creation=${creationTokens}`,
+      `output=${u.outputTokens}`,
+    ];
+    if (hitRate !== null) parts.push(`hit_rate=${hitRate}%`);
+    if (billableRatio !== null) parts.push(`billable_ratio=${billableRatio}%`);
+    await onLog("stdout", `[paperclip-cache] ${parts.join(" ")}\n`);
+  };
+
   const initial = await runAttempt(sessionId ?? null);
   if (
     sessionId &&
@@ -728,8 +754,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[paperclip] Claude resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
     );
     const retry = await runAttempt(null);
-    return toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+    const retryResult = toAdapterResult(retry, { fallbackSessionId: null, clearSessionOnMissingSession: true });
+    await logCacheMetrics(retryResult);
+    return retryResult;
   }
 
-  return toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+  const result = toAdapterResult(initial, { fallbackSessionId: runtimeSessionId || runtime.sessionId });
+  await logCacheMetrics(result);
+  return result;
 }
