@@ -281,7 +281,7 @@ describe("pluginCapabilityValidator.validateManifestCapabilities", () => {
   it("returns allowed:false when jobs are declared without jobs.schedule", () => {
     const v = pluginCapabilityValidator();
     const m = makeManifest(["issues.read"], {
-      jobs: [{ name: "daily-sync", description: "Sync daily", trigger: { type: "schedule", cron: "0 0 * * *" } }],
+      jobs: [{ jobKey: "daily-sync", displayName: "Daily Sync", description: "Sync daily", schedule: "0 0 * * *" }],
     });
     const result = v.validateManifestCapabilities(m);
     expect(result.allowed).toBe(false);
@@ -294,7 +294,7 @@ describe("pluginCapabilityValidator.validateManifestCapabilities", () => {
       tools: [
         { name: "t", displayName: "T", description: "test", parametersSchema: { type: "object", properties: {} } },
       ],
-      jobs: [{ name: "j", description: "job", trigger: { type: "schedule", cron: "* * * * *" } }],
+      jobs: [{ jobKey: "j", displayName: "J", description: "job", schedule: "* * * * *" }],
     });
     const result = v.validateManifestCapabilities(m);
     expect(result.allowed).toBe(false);
