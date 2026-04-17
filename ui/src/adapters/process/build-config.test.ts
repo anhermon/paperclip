@@ -22,6 +22,9 @@ function makeValues(overrides: Partial<CreateConfigValues> = {}): CreateConfigVa
     envBindings: {},
     url: "",
     bootstrapPrompt: "",
+    maxTurnsPerRun: 0,
+    heartbeatEnabled: false,
+    intervalSec: 60,
     ...overrides,
   };
 }
