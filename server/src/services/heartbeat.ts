@@ -5985,13 +5985,28 @@ export function heartbeatService(db: Db) {
 
     tickTimers: async (now = new Date()) => {
       const allAgents = await db.select().from(agents);
+      const agentsWithPendingTimerRun = await db
+        .selectDistinctOn([heartbeatRuns.agentId], { agentId: heartbeatRuns.agentId })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.status, "queued"),
+            eq(heartbeatRuns.invocationSource, "timer"),
+          ),
+        )
+        .then((rows) => new Set(rows.map((row) => row.agentId)));
       let checked = 0;
       let enqueued = 0;
       let skipped = 0;
       let adaptiveSkipped = 0;
 
       for (const agent of allAgents) {
-        if (agent.status === "paused" || agent.status === "terminated" || agent.status === "pending_approval") continue;
+        if (
+          agent.status === "paused" ||
+          agent.status === "terminated" ||
+          agent.status === "pending_approval" ||
+          agent.status === "error"
+        ) continue;
         // remote_trigger agents are driven by external schedulers (e.g. CoWork RemoteTriggers);
         // skip native interval-based scheduling so they don't get double-fired.
         if (agent.adapterType === "remote_trigger") continue;
@@ -6014,6 +6029,11 @@ export function heartbeatService(db: Db) {
               continue;
             }
           }
+        }
+
+        if (agentsWithPendingTimerRun.has(agent.id)) {
+          skipped += 1;
+          continue;
         }
 
         const run = await enqueueWakeup(agent.id, {

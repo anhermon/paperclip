@@ -392,6 +392,81 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     return { companyId, agentId, runId, wakeupRequestId, issueId };
   }
 
+  async function seedTimerAgentFixture(input: {
+    status: "idle" | "error";
+    lastHeartbeatAt?: Date;
+  }) {
+    const companyId = randomUUID();
+    const agentId = randomUUID();
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Timer Recovery Tests",
+      issuePrefix,
+      requireBoardApprovalForNewAgents: false,
+    });
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: `TimerAgent-${agentId.slice(0, 8)}`,
+      role: "engineer",
+      status: input.status,
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {
+        heartbeat: {
+          enabled: true,
+          intervalSec: 300,
+        },
+      },
+      permissions: {},
+      lastHeartbeatAt: input.lastHeartbeatAt ?? new Date("2026-03-19T00:00:00.000Z"),
+    });
+
+    return { companyId, agentId };
+  }
+
+  async function seedQueuedTimerRunFixture(agentId: string, companyId: string) {
+    const wakeupRequestId = randomUUID();
+    const runId = randomUUID();
+
+    await db.insert(agentWakeupRequests).values({
+      id: wakeupRequestId,
+      companyId,
+      agentId,
+      source: "timer",
+      triggerDetail: "system",
+      reason: "heartbeat_timer",
+      payload: null,
+      status: "queued",
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "timer",
+      triggerDetail: "system",
+      status: "queued",
+      wakeupRequestId,
+      contextSnapshot: {
+        source: "scheduler",
+        reason: "interval_elapsed",
+      },
+      createdAt: new Date("2026-03-19T00:05:00.000Z"),
+      updatedAt: new Date("2026-03-19T00:05:00.000Z"),
+    });
+
+    await db
+      .update(agentWakeupRequests)
+      .set({ runId })
+      .where(eq(agentWakeupRequests.id, wakeupRequestId));
+
+    return { runId, wakeupRequestId };
+  }
+
   it("keeps a local run active when the recorded pid is still alive", async () => {
     const child = spawnAliveProcess();
     childProcesses.add(child);
@@ -753,5 +828,53 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     const result = await heartbeat.reapStaleExecutionRunLocks();
     expect(result.reaped).toBe(0);
     expect(result.issueIds).toHaveLength(0);
+  });
+
+  it("tickTimers: skips agents in error state", async () => {
+    const { agentId } = await seedTimerAgentFixture({ status: "error" });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.tickTimers(new Date("2026-03-19T00:10:00.000Z"));
+
+    expect(result.enqueued).toBe(0);
+    const runs = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.agentId, agentId));
+    expect(runs).toHaveLength(0);
+  });
+
+  it("tickTimers: enqueues timer runs for idle agents after the interval elapses", async () => {
+    const { agentId } = await seedTimerAgentFixture({ status: "idle" });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.tickTimers(new Date("2026-03-19T00:10:00.000Z"));
+
+    expect(result.enqueued).toBe(1);
+    const runs = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.agentId, agentId));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.invocationSource).toBe("timer");
+    if (runs[0]) {
+      await waitForRunToSettle(heartbeat, runs[0].id);
+    }
+  });
+
+  it("tickTimers: does not stack another timer run when one is already queued", async () => {
+    const { agentId, companyId } = await seedTimerAgentFixture({ status: "idle" });
+    await seedQueuedTimerRunFixture(agentId, companyId);
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.tickTimers(new Date("2026-03-19T00:10:00.000Z"));
+
+    expect(result.enqueued).toBe(0);
+    expect(result.skipped).toBe(1);
+    const runs = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.agentId, agentId));
+    expect(runs).toHaveLength(1);
   });
 });
