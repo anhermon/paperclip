@@ -142,6 +142,19 @@ test.describe("Heartbeat cycle", () => {
     // Either 202 (queued/accepted), 200, or 429 (rate limited) is acceptable
     expect([200, 202, 429]).toContain(secondHeartbeatRes.status());
 
+    // Wait for all heartbeat runs to complete before cleanup to prevent FK violations
+    await expect
+      .poll(
+        async () => {
+          const runRes = await board.get(`${BASE_URL}/api/companies/${company.id}/heartbeat-runs?agentId=${agent.id}`);
+          const runs = await runRes.json();
+          // Check that all runs are in terminal state
+          return runs.every((r: { status: string }) => ["succeeded", "failed", "cancelled"].includes(r.status));
+        },
+        { timeout: 30_000, intervals: [500, 1_000, 2_000] }
+      )
+      .toBe(true);
+
     // Cleanup
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();

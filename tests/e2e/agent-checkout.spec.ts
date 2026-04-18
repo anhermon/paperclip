@@ -52,16 +52,24 @@ test.describe("Agent checkout", () => {
     expect(agentRes.ok()).toBe(true);
     const agent = await agentRes.json();
 
-    // Create issue
+    // Create issue in backlog (unassigned) to prevent automatic checkout during heartbeat execution
     const issueRes = await board.post(`${BASE_URL}/api/companies/${company.id}/issues`, {
       data: {
         title: "Checkout test issue",
-        status: "todo",
-        assigneeAgentId: agent.id,
+        status: "backlog",
       },
     });
     expect(issueRes.ok()).toBe(true);
     const issue = await issueRes.json();
+
+    // Assign to agent and move to todo
+    const assignRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
+      data: {
+        assigneeAgentId: agent.id,
+        status: "todo",
+      },
+    });
+    expect(assignRes.ok()).toBe(true);
 
     // Create heartbeat run for checkout
     const heartbeatRes = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
@@ -83,6 +91,18 @@ test.describe("Agent checkout", () => {
     expect(checkedOutIssue.checkoutRunId).toBe(heartbeatRun.id);
     expect(checkedOutIssue.executionRunId).toBe(heartbeatRun.id);
     expect(checkedOutIssue.executionLockedAt).toBeTruthy();
+
+    // Wait for heartbeat run to complete before cleanup to prevent FK violations
+    await expect
+      .poll(
+        async () => {
+          const runRes = await board.get(`${BASE_URL}/api/companies/${company.id}/heartbeat-runs?agentId=${agent.id}`);
+          const runs = await runRes.json();
+          return runs.every((r: { status: string }) => ["succeeded", "failed", "cancelled"].includes(r.status));
+        },
+        { timeout: 30_000, intervals: [500, 1_000, 2_000] }
+      )
+      .toBe(true);
 
     // Cleanup
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
@@ -297,16 +317,24 @@ test.describe("Agent checkout", () => {
     expect(agentRes.ok()).toBe(true);
     const agent = await agentRes.json();
 
-    // Create issue
+    // Create issue in backlog (unassigned) to prevent automatic checkout during heartbeat execution
     const issueRes = await board.post(`${BASE_URL}/api/companies/${company.id}/issues`, {
       data: {
         title: "Recheckout test issue",
-        status: "todo",
-        assigneeAgentId: agent.id,
+        status: "backlog",
       },
     });
     expect(issueRes.ok()).toBe(true);
     const issue = await issueRes.json();
+
+    // Assign to agent and move to todo
+    const assignRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
+      data: {
+        assigneeAgentId: agent.id,
+        status: "todo",
+      },
+    });
+    expect(assignRes.ok()).toBe(true);
 
     // First checkout
     const heartbeat1Res = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
@@ -346,6 +374,18 @@ test.describe("Agent checkout", () => {
     expect(checkout2Res.ok()).toBe(true);
     const recheckedOutIssue = await checkout2Res.json();
     expect(recheckedOutIssue.executionRunId).toBe(heartbeat2Run.id);
+
+    // Wait for all heartbeat runs to complete before cleanup to prevent FK violations
+    await expect
+      .poll(
+        async () => {
+          const runRes = await board.get(`${BASE_URL}/api/companies/${company.id}/heartbeat-runs?agentId=${agent.id}`);
+          const runs = await runRes.json();
+          return runs.every((r: { status: string }) => ["succeeded", "failed", "cancelled"].includes(r.status));
+        },
+        { timeout: 30_000, intervals: [500, 1_000, 2_000] }
+      )
+      .toBe(true);
 
     // Cleanup
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});

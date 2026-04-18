@@ -67,7 +67,12 @@ test.describe("Task lifecycle", () => {
     expect(issue.status).toBe("backlog");
     expect(issue.assigneeAgentId).toBeNull();
 
-    // Step 2: Assign to agent (moves to todo)
+    // Step 2: Create heartbeat run (before assignment to prevent automatic checkout race)
+    const heartbeatRes = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
+    expect(heartbeatRes.ok()).toBe(true);
+    const heartbeatRun = await heartbeatRes.json();
+
+    // Step 3: Assign to agent (moves to todo)
     const assignRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
       data: {
         assigneeAgentId: agent.id,
@@ -79,12 +84,7 @@ test.describe("Task lifecycle", () => {
     expect(assignedIssue.status).toBe("todo");
     expect(assignedIssue.assigneeAgentId).toBe(agent.id);
 
-    // Step 3: Checkout the issue (creates a heartbeat run and locks it)
-    // First create a heartbeat run
-    const heartbeatRes = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
-    expect(heartbeatRes.ok()).toBe(true);
-    const heartbeatRun = await heartbeatRes.json();
-
+    // Step 4: Checkout the issue
     const checkoutRes = await board.post(`${BASE_URL}/api/issues/${issue.id}/checkout`, {
       data: {
         agentId: agent.id,
@@ -97,7 +97,7 @@ test.describe("Task lifecycle", () => {
     expect(checkedOutIssue.checkoutRunId).toBe(heartbeatRun.id);
     expect(checkedOutIssue.executionRunId).toBe(heartbeatRun.id);
 
-    // Step 4: Move to in_progress
+    // Step 5: Move to in_progress
     const inProgressRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
       data: {
         status: "in_progress",
@@ -109,7 +109,7 @@ test.describe("Task lifecycle", () => {
     expect(inProgressIssue.status).toBe("in_progress");
     expect(inProgressIssue.startedAt).toBeTruthy();
 
-    // Step 5: Complete the task
+    // Step 6: Complete the task
     const doneRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
       data: {
         status: "done",
@@ -120,6 +120,18 @@ test.describe("Task lifecycle", () => {
     const doneIssue = await doneRes.json();
     expect(doneIssue.status).toBe("done");
     expect(doneIssue.completedAt).toBeTruthy();
+
+    // Wait for heartbeat run to complete before cleanup to prevent FK violations
+    await expect
+      .poll(
+        async () => {
+          const runRes = await board.get(`${BASE_URL}/api/companies/${company.id}/heartbeat-runs?agentId=${agent.id}`);
+          const runs = await runRes.json();
+          return runs.every((r: { status: string }) => ["succeeded", "failed", "cancelled"].includes(r.status));
+        },
+        { timeout: 30_000, intervals: [500, 1_000, 2_000] }
+      )
+      .toBe(true);
 
     // Cleanup
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
