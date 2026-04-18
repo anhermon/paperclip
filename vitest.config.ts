@@ -5,7 +5,9 @@ export default defineConfig({
     projects: [
       "packages/adapter-utils",
       "packages/db",
+      "packages/adapters/claude-local",
       "packages/adapters/codex-local",
+      "packages/adapters/cursor-local",
       "packages/adapters/gemini-local",
       "packages/adapters/opencode-local",
       "packages/adapters/openclaw-gateway",
