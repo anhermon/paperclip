@@ -85,7 +85,6 @@ test.describe("Agent checkout", () => {
     expect(checkedOutIssue.executionLockedAt).toBeTruthy();
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
@@ -191,8 +190,6 @@ test.describe("Agent checkout", () => {
     expect([403, 409]).toContain(checkout2Res.status());
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent1.id}`).catch(() => {});
-    await board.delete(`${BASE_URL}/api/agents/${agent2.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
@@ -261,7 +258,6 @@ test.describe("Agent checkout", () => {
     expect([409, 422]).toContain(checkoutRes.status());
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
@@ -352,7 +348,6 @@ test.describe("Agent checkout", () => {
     expect(recheckedOutIssue.executionRunId).toBe(heartbeat2Run.id);
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
