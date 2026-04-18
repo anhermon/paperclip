@@ -309,7 +309,7 @@ describe("parseCursorStdoutLine — legacy event shapes", () => {
   it("returns system entry for step_start", () => {
     const line = JSON.stringify({ type: "step_start", sessionID: "s1" });
     const result = parseCursorStdoutLine(line, TS);
-    expect(result[0]).toMatchObject({ kind: "system", text: "step started (session: s1)" });
+    expect(result[0]).toMatchObject({ kind: "system", text: "step started (s1)" });
   });
 
   it("returns assistant entry for text event", () => {
