@@ -94,7 +94,6 @@ test.describe("Heartbeat cycle", () => {
     expect(updatedIssue.assigneeAgentId).toBe(agent.id);
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
@@ -144,7 +143,6 @@ test.describe("Heartbeat cycle", () => {
     expect([200, 202, 429]).toContain(secondHeartbeatRes.status());
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });

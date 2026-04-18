@@ -122,7 +122,6 @@ test.describe("Task lifecycle", () => {
     expect(doneIssue.completedAt).toBeTruthy();
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
@@ -196,7 +195,6 @@ test.describe("Task lifecycle", () => {
     expect(resumedIssue.status).toBe("in_progress");
 
     // Cleanup
-    await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
     await board.delete(`${BASE_URL}/api/companies/${company.id}`).catch(() => {});
     await board.dispose();
   });
