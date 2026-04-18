@@ -44,7 +44,7 @@ test.describe("Task lifecycle", () => {
           heartbeat: {
             enabled: false,
             intervalSec: 300,
-            wakeOnDemand: false,
+            wakeOnDemand: true,
             cooldownSec: 10,
             maxConcurrentRuns: 1,
           },
@@ -152,7 +152,7 @@ test.describe("Task lifecycle", () => {
           heartbeat: {
             enabled: false,
             intervalSec: 300,
-            wakeOnDemand: false,
+            wakeOnDemand: true,
             cooldownSec: 10,
             maxConcurrentRuns: 1,
           },

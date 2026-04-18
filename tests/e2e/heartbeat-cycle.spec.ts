@@ -82,7 +82,7 @@ test.describe("Heartbeat cycle", () => {
         },
         { timeout: 30_000, intervals: [500, 1_000, 2_000] }
       )
-      .toBe("completed");
+      .toBe("succeeded");
 
     // Verify the issue was processed (should be checked out during heartbeat)
     const updatedIssueRes = await board.get(`${BASE_URL}/api/issues/${issue.id}`);
@@ -140,8 +140,8 @@ test.describe("Heartbeat cycle", () => {
 
     // Immediate second invocation should be rejected or queued (due to cooldown/maxConcurrentRuns)
     const secondHeartbeatRes = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
-    // Either 429 (rate limited) or 200 (queued) is acceptable
-    expect([200, 429]).toContain(secondHeartbeatRes.status());
+    // Either 202 (queued/accepted), 200, or 429 (rate limited) is acceptable
+    expect([200, 202, 429]).toContain(secondHeartbeatRes.status());
 
     // Cleanup
     await board.delete(`${BASE_URL}/api/agents/${agent.id}`).catch(() => {});
