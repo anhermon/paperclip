@@ -190,7 +190,7 @@ describe("PaperclipApiClient.requestJson — URL construction", () => {
 describe("PaperclipApiClient.requestJson — headers", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  function getHeaders(fetchSpy: ReturnType<typeof vi.spyOn>): Record<string, string> {
+  function getHeaders(fetchSpy: { mock: { calls: Array<[unknown, RequestInit?]> } }): Record<string, string> {
     return (fetchSpy.mock.calls[0]![1]?.headers ?? {}) as Record<string, string>;
   }
 
