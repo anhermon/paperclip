@@ -21,7 +21,7 @@ function makeConfig(overrides: {
       port: 3100,
     },
     auth: {
-      baseUrlMode: "automatic",
+      baseUrlMode: "auto",
       publicBaseUrl: undefined,
       jwtSecret: null,
       ...overrides.auth,
@@ -95,12 +95,12 @@ describe("deploymentAuthCheck — authenticated mode, no secret", () => {
   });
 
   it("returns fail when BETTER_AUTH_SECRET and JWT secret are both missing", () => {
-    const result = deploymentAuthCheck(makeConfig({ deploymentMode: "local_network" }));
+    const result = deploymentAuthCheck(makeConfig({ deploymentMode: "authenticated" }));
     expect(result.status).toBe("fail");
   });
 
   it("fail message mentions BETTER_AUTH_SECRET", () => {
-    const result = deploymentAuthCheck(makeConfig({ deploymentMode: "local_network" }));
+    const result = deploymentAuthCheck(makeConfig({ deploymentMode: "authenticated" }));
     expect(result.message).toContain("BETTER_AUTH_SECRET");
   });
 });
@@ -120,16 +120,16 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
 
   it("returns pass for private exposure with explicit baseUrl mode set", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "private",
-      auth: { baseUrlMode: "automatic" },
+      auth: { baseUrlMode: "auto" },
     }));
     expect(result.status).toBe("pass");
   });
 
   it("returns fail when explicit baseUrlMode lacks publicBaseUrl", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "private",
       auth: { baseUrlMode: "explicit", publicBaseUrl: undefined },
     }));
@@ -138,16 +138,16 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
 
   it("returns fail for public exposure without explicit publicBaseUrl", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "public",
-      auth: { baseUrlMode: "automatic" },
+      auth: { baseUrlMode: "auto" },
     }));
     expect(result.status).toBe("fail");
   });
 
   it("returns warn for public exposure with http:// publicBaseUrl", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "public",
       auth: { baseUrlMode: "explicit", publicBaseUrl: "http://example.com" },
     }));
@@ -157,7 +157,7 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
 
   it("returns fail for public exposure with invalid publicBaseUrl", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "public",
       auth: { baseUrlMode: "explicit", publicBaseUrl: "not-a-url" },
     }));
@@ -166,7 +166,7 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
 
   it("returns pass for public exposure with https:// publicBaseUrl", () => {
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "public",
       auth: { baseUrlMode: "explicit", publicBaseUrl: "https://paperclip.example.com" },
     }));
@@ -177,7 +177,7 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
     vi.stubEnv("BETTER_AUTH_SECRET", "");
     vi.stubEnv("PAPERCLIP_AGENT_JWT_SECRET", "jwt-secret");
     const result = deploymentAuthCheck(makeConfig({
-      deploymentMode: "local_network",
+      deploymentMode: "authenticated",
       exposure: "private",
     }));
     expect(result.status).toBe("pass");
