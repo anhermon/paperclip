@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("./paths.js", () => ({
-  resolvePaperclipConfigPath: vi.fn().mockReturnValue("/home/user/.paperclip/config.json"),
-  resolvePaperclipEnvPath: vi.fn().mockReturnValue("/home/user/.paperclip/.env"),
-}));
+// Use env-var injection so resolvePaperclipConfigPath returns a known path
+// without relying on vi.mock of a local module (which can be unreliable in ESM).
+// paths.ts checks PAPERCLIP_CONFIG first, so we inject it in beforeEach.
+const TEST_CONFIG_PATH = "/home/user/.paperclip/config.json";
 
-// Mock the fs module so we control existsSync / readFileSync
+// Mock the fs module so existsSync never accidentally reads the real filesystem
+// (e.g. for the JWT secret env-file check inside printStartupBanner).
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -45,6 +46,7 @@ function makeOpts(overrides: Partial<BannerOpts> = {}): BannerOpts {
 beforeEach(() => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.mocked(existsSync).mockReturnValue(false);
+  vi.stubEnv("PAPERCLIP_CONFIG", TEST_CONFIG_PATH);
 });
 
 afterEach(() => {
