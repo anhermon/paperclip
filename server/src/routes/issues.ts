@@ -2145,8 +2145,10 @@ export function issueRoutes(
       return;
     }
 
-    const checkoutRunId = requireAgentRunId(req, res);
-    if (req.actor.type === "agent" && !checkoutRunId) return;
+    const agentRunId = requireAgentRunId(req, res);
+    if (req.actor.type === "agent" && !agentRunId) return;
+    // Allow board users to specify runId in request body; agents use their authenticated runId
+    const checkoutRunId = req.body.runId ?? agentRunId;
     const updated = await svc.checkout(id, req.body.agentId, req.body.expectedStatuses, checkoutRunId);
     const actor = getActorInfo(req);
 
