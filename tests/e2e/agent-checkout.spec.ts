@@ -42,7 +42,7 @@ test.describe("Agent checkout", () => {
           heartbeat: {
             enabled: false,
             intervalSec: 300,
-            wakeOnDemand: true,
+            wakeOnDemand: false,
             cooldownSec: 10,
             maxConcurrentRuns: 1,
           },
@@ -52,45 +52,32 @@ test.describe("Agent checkout", () => {
     expect(agentRes.ok()).toBe(true);
     const agent = await agentRes.json();
 
-    // Create issue in backlog (unassigned) to prevent automatic checkout during heartbeat execution
+    // Create issue (wakeOnDemand is false so no assignment wakeup fires)
     const issueRes = await board.post(`${BASE_URL}/api/companies/${company.id}/issues`, {
       data: {
         title: "Checkout test issue",
-        status: "backlog",
+        status: "todo",
+        assigneeAgentId: agent.id,
       },
     });
     expect(issueRes.ok()).toBe(true);
     const issue = await issueRes.json();
 
-    // Assign to agent and move to todo
-    const assignRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
-      data: {
-        assigneeAgentId: agent.id,
-        status: "todo",
-      },
-    });
-    expect(assignRes.ok()).toBe(true);
-
-    // Create heartbeat run for checkout
-    const heartbeatRes = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
-    expect(heartbeatRes.ok()).toBe(true);
-    const heartbeatRun = await heartbeatRes.json();
-
-    // Checkout the issue
+    // Checkout the issue (board users call checkout directly; runId is a JWT claim
+    // only available to agent callers, so checkoutRunId/executionRunId are null here)
     const checkoutRes = await board.post(`${BASE_URL}/api/issues/${issue.id}/checkout`, {
       data: {
         agentId: agent.id,
         expectedStatuses: ["todo"],
-        runId: heartbeatRun.id,
       },
     });
     expect(checkoutRes.ok()).toBe(true);
     const checkedOutIssue = await checkoutRes.json();
 
-    // Verify checkout locked the issue
-    expect(checkedOutIssue.checkoutRunId).toBe(heartbeatRun.id);
-    expect(checkedOutIssue.executionRunId).toBe(heartbeatRun.id);
-    expect(checkedOutIssue.executionLockedAt).toBeTruthy();
+    // Verify checkout transitioned the issue to in_progress
+    expect(checkedOutIssue.status).toBe("in_progress");
+    expect(checkedOutIssue.assigneeAgentId).toBe(agent.id);
+    expect(checkedOutIssue.startedAt).toBeTruthy();
 
     // Wait for heartbeat run to complete before cleanup to prevent FK violations
     await expect
@@ -307,7 +294,7 @@ test.describe("Agent checkout", () => {
           heartbeat: {
             enabled: false,
             intervalSec: 300,
-            wakeOnDemand: true,
+            wakeOnDemand: false,
             cooldownSec: 10,
             maxConcurrentRuns: 1,
           },
@@ -317,63 +304,46 @@ test.describe("Agent checkout", () => {
     expect(agentRes.ok()).toBe(true);
     const agent = await agentRes.json();
 
-    // Create issue in backlog (unassigned) to prevent automatic checkout during heartbeat execution
+    // Create issue (wakeOnDemand is false so no assignment wakeup fires)
     const issueRes = await board.post(`${BASE_URL}/api/companies/${company.id}/issues`, {
       data: {
         title: "Recheckout test issue",
-        status: "backlog",
+        status: "todo",
+        assigneeAgentId: agent.id,
       },
     });
     expect(issueRes.ok()).toBe(true);
     const issue = await issueRes.json();
 
-    // Assign to agent and move to todo
-    const assignRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
-      data: {
-        assigneeAgentId: agent.id,
-        status: "todo",
-      },
-    });
-    expect(assignRes.ok()).toBe(true);
-
-    // First checkout
-    const heartbeat1Res = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
-    expect(heartbeat1Res.ok()).toBe(true);
-    const heartbeat1Run = await heartbeat1Res.json();
-
+    // First checkout — transitions todo → in_progress
     const checkout1Res = await board.post(`${BASE_URL}/api/issues/${issue.id}/checkout`, {
       data: {
         agentId: agent.id,
         expectedStatuses: ["todo"],
-        runId: heartbeat1Run.id,
       },
     });
     expect(checkout1Res.ok()).toBe(true);
 
-    // Update issue status (clearing the lock)
+    // Update issue status to blocked (clears execution lock fields, enabling re-checkout)
     const updateRes = await board.patch(`${BASE_URL}/api/issues/${issue.id}`, {
       data: {
-        status: "in_progress",
-        comment: "Working on it",
+        status: "blocked",
+        comment: "Pausing work temporarily",
       },
     });
     expect(updateRes.ok()).toBe(true);
 
-    // Second checkout (re-checkout)
-    const heartbeat2Res = await board.post(`${BASE_URL}/api/agents/${agent.id}/heartbeat/invoke`);
-    expect(heartbeat2Res.ok()).toBe(true);
-    const heartbeat2Run = await heartbeat2Res.json();
-
+    // Second checkout (re-checkout) — transitions blocked → in_progress
     const checkout2Res = await board.post(`${BASE_URL}/api/issues/${issue.id}/checkout`, {
       data: {
         agentId: agent.id,
-        expectedStatuses: ["in_progress"],
-        runId: heartbeat2Run.id,
+        expectedStatuses: ["blocked"],
       },
     });
     expect(checkout2Res.ok()).toBe(true);
     const recheckedOutIssue = await checkout2Res.json();
-    expect(recheckedOutIssue.executionRunId).toBe(heartbeat2Run.id);
+    expect(recheckedOutIssue.status).toBe("in_progress");
+    expect(recheckedOutIssue.startedAt).toBeTruthy();
 
     // Wait for all heartbeat runs to complete before cleanup to prevent FK violations
     await expect

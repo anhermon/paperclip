@@ -89,8 +89,10 @@ test.describe("Heartbeat cycle", () => {
     expect(updatedIssueRes.ok()).toBe(true);
     const updatedIssue = await updatedIssueRes.json();
 
-    // The issue should have been checked out (executionRunId set)
-    expect(updatedIssue.executionRunId).toBeTruthy();
+    // The issue should have been checked out by the assignment-triggered heartbeat run.
+    // executionRunId is cleared by releaseIssueExecutionAndPromote after the run completes,
+    // but the status remains in_progress.
+    expect(updatedIssue.status).toBe("in_progress");
     expect(updatedIssue.assigneeAgentId).toBe(agent.id);
 
     // Cleanup
