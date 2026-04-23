@@ -26,7 +26,7 @@ describe("publishLiveEvent — event delivery", () => {
     const listener = vi.fn();
     cleanupFns.push(subscribeCompanyLiveEvents("company-1", listener));
 
-    publishLiveEvent({ companyId: "company-1", type: "issue.updated" });
+    publishLiveEvent({ companyId: "company-1", type: "activity.logged" });
 
     expect(listener).toHaveBeenCalledOnce();
   });
@@ -35,7 +35,7 @@ describe("publishLiveEvent — event delivery", () => {
     const listener = vi.fn();
     cleanupFns.push(subscribeCompanyLiveEvents("company-B", listener));
 
-    publishLiveEvent({ companyId: "company-A", type: "issue.updated" });
+    publishLiveEvent({ companyId: "company-A", type: "activity.logged" });
 
     expect(listener).not.toHaveBeenCalled();
   });
@@ -44,7 +44,7 @@ describe("publishLiveEvent — event delivery", () => {
     const listener = vi.fn();
     cleanupFns.push(subscribeGlobalLiveEvents(listener));
 
-    publishLiveEvent({ companyId: "company-1", type: "issue.updated" });
+    publishLiveEvent({ companyId: "company-1", type: "activity.logged" });
 
     expect(listener).not.toHaveBeenCalled();
   });
@@ -55,7 +55,7 @@ describe("publishLiveEvent — event delivery", () => {
     cleanupFns.push(subscribeCompanyLiveEvents("co", a));
     cleanupFns.push(subscribeCompanyLiveEvents("co", b));
 
-    publishLiveEvent({ companyId: "co", type: "agent.updated" });
+    publishLiveEvent({ companyId: "co", type: "agent.status" });
 
     expect(a).toHaveBeenCalledOnce();
     expect(b).toHaveBeenCalledOnce();
@@ -68,41 +68,41 @@ describe("publishLiveEvent — event delivery", () => {
 
 describe("publishLiveEvent — returned event shape", () => {
   it("returns an event with the correct companyId", () => {
-    const event = publishLiveEvent({ companyId: "co-42", type: "issue.created" });
+    const event = publishLiveEvent({ companyId: "co-42", type: "heartbeat.run.queued" });
     expect(event.companyId).toBe("co-42");
   });
 
   it("returns an event with the correct type", () => {
-    const event = publishLiveEvent({ companyId: "co", type: "agent.updated" });
-    expect(event.type).toBe("agent.updated");
+    const event = publishLiveEvent({ companyId: "co", type: "agent.status" });
+    expect(event.type).toBe("agent.status");
   });
 
   it("returns an event with a numeric id", () => {
-    const event = publishLiveEvent({ companyId: "co", type: "issue.updated" });
+    const event = publishLiveEvent({ companyId: "co", type: "activity.logged" });
     expect(typeof event.id).toBe("number");
     expect(event.id).toBeGreaterThan(0);
   });
 
   it("returns incremented id on successive calls", () => {
-    const e1 = publishLiveEvent({ companyId: "co", type: "issue.updated" });
-    const e2 = publishLiveEvent({ companyId: "co", type: "issue.updated" });
+    const e1 = publishLiveEvent({ companyId: "co", type: "activity.logged" });
+    const e2 = publishLiveEvent({ companyId: "co", type: "activity.logged" });
     expect(e2.id).toBe(e1.id + 1);
   });
 
   it("returns an event with a createdAt ISO string", () => {
-    const event = publishLiveEvent({ companyId: "co", type: "issue.created" });
+    const event = publishLiveEvent({ companyId: "co", type: "heartbeat.run.queued" });
     expect(() => new Date(event.createdAt)).not.toThrow();
     expect(new Date(event.createdAt).toISOString()).toBe(event.createdAt);
   });
 
   it("returns an event with the provided payload", () => {
-    const payload = { issueId: "issue-1", title: "Fix bug" };
-    const event = publishLiveEvent({ companyId: "co", type: "issue.updated", payload });
+    const payload = { runId: "run-1", detail: "started" };
+    const event = publishLiveEvent({ companyId: "co", type: "activity.logged", payload });
     expect(event.payload).toEqual(payload);
   });
 
   it("defaults payload to empty object when not provided", () => {
-    const event = publishLiveEvent({ companyId: "co", type: "issue.created" });
+    const event = publishLiveEvent({ companyId: "co", type: "heartbeat.run.queued" });
     expect(event.payload).toEqual({});
   });
 });
@@ -116,7 +116,7 @@ describe("publishGlobalLiveEvent — event delivery", () => {
     const listener = vi.fn();
     cleanupFns.push(subscribeGlobalLiveEvents(listener));
 
-    publishGlobalLiveEvent({ type: "agent.updated" });
+    publishGlobalLiveEvent({ type: "agent.status" });
 
     expect(listener).toHaveBeenCalledOnce();
   });
@@ -125,13 +125,13 @@ describe("publishGlobalLiveEvent — event delivery", () => {
     const listener = vi.fn();
     cleanupFns.push(subscribeCompanyLiveEvents("company-1", listener));
 
-    publishGlobalLiveEvent({ type: "agent.updated" });
+    publishGlobalLiveEvent({ type: "agent.status" });
 
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("sets companyId to '*' on global events", () => {
-    const event = publishGlobalLiveEvent({ type: "agent.updated" });
+    const event = publishGlobalLiveEvent({ type: "agent.status" });
     expect(event.companyId).toBe("*");
   });
 
@@ -141,7 +141,7 @@ describe("publishGlobalLiveEvent — event delivery", () => {
     cleanupFns.push(subscribeGlobalLiveEvents(a));
     cleanupFns.push(subscribeGlobalLiveEvents(b));
 
-    publishGlobalLiveEvent({ type: "agent.updated" });
+    publishGlobalLiveEvent({ type: "agent.status" });
 
     expect(a).toHaveBeenCalledOnce();
     expect(b).toHaveBeenCalledOnce();
@@ -158,7 +158,7 @@ describe("live-events — unsubscribe", () => {
     const unsub = subscribeCompanyLiveEvents("co", listener);
 
     unsub();
-    publishLiveEvent({ companyId: "co", type: "issue.updated" });
+    publishLiveEvent({ companyId: "co", type: "activity.logged" });
 
     expect(listener).not.toHaveBeenCalled();
   });
@@ -168,7 +168,7 @@ describe("live-events — unsubscribe", () => {
     const unsub = subscribeGlobalLiveEvents(listener);
 
     unsub();
-    publishGlobalLiveEvent({ type: "agent.updated" });
+    publishGlobalLiveEvent({ type: "agent.status" });
 
     expect(listener).not.toHaveBeenCalled();
   });
@@ -180,7 +180,7 @@ describe("live-events — unsubscribe", () => {
     cleanupFns.push(subscribeCompanyLiveEvents("co", b));
 
     unsubA();
-    publishLiveEvent({ companyId: "co", type: "issue.updated" });
+    publishLiveEvent({ companyId: "co", type: "activity.logged" });
 
     expect(a).not.toHaveBeenCalled();
     expect(b).toHaveBeenCalledOnce();
