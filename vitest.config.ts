@@ -5,6 +5,7 @@ export default defineConfig({
     projects: [
       "packages/adapter-utils",
       "packages/db",
+      "packages/mcp-server",
       "packages/adapters/claude-local",
       "packages/adapters/codex-local",
       "packages/adapters/cursor-local",
@@ -13,6 +14,7 @@ export default defineConfig({
       "packages/adapters/openclaw-gateway",
       "packages/adapters/pi-local",
       "packages/shared",
+      "packages/plugins/sdk",
       "server",
       "ui",
       "cli",
