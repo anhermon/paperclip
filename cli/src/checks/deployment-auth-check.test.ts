@@ -173,9 +173,30 @@ describe("deploymentAuthCheck — authenticated mode, secret present", () => {
     expect(result.status).toBe("pass");
   });
 
-  it("falls back to PAPERCLIP_AGENT_JWT_SECRET when BETTER_AUTH_SECRET is absent", () => {
-    vi.stubEnv("BETTER_AUTH_SECRET", "");
+});
+
+// ============================================================================
+// deploymentAuthCheck — JWT secret fallback (no BETTER_AUTH_SECRET in env)
+// ============================================================================
+
+describe("deploymentAuthCheck — JWT secret fallback", () => {
+  let savedBetterAuthSecret: string | undefined;
+
+  beforeEach(() => {
+    // Stash and delete BETTER_AUTH_SECRET so the ?? fallback can fire
+    savedBetterAuthSecret = process.env.BETTER_AUTH_SECRET;
+    delete process.env.BETTER_AUTH_SECRET;
     vi.stubEnv("PAPERCLIP_AGENT_JWT_SECRET", "jwt-secret");
+  });
+
+  afterEach(() => {
+    if (savedBetterAuthSecret !== undefined) {
+      process.env.BETTER_AUTH_SECRET = savedBetterAuthSecret;
+    }
+    vi.unstubAllEnvs();
+  });
+
+  it("returns pass when only PAPERCLIP_AGENT_JWT_SECRET is set", () => {
     const result = deploymentAuthCheck(makeConfig({
       deploymentMode: "authenticated",
       exposure: "private",
