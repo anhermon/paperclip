@@ -5,16 +5,19 @@ import type {
   AdapterEnvironmentTestResult,
   CompanySecret,
   EnvBinding,
+  Environment,
 } from "@paperclipai/shared";
+import { AGENT_DEFAULT_MAX_CONCURRENT_RUNS, supportedEnvironmentDriversForAdapter } from "@paperclipai/shared";
 import type { AdapterModel } from "../api/agents";
 import { agentsApi } from "../api/agents";
+import { environmentsApi } from "../api/environments";
+import { instanceSettingsApi } from "../api/instanceSettings";
 import { secretsApi } from "../api/secrets";
 import { assetsApi } from "../api/assets";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CLAUDE_LOCAL_MODEL } from "@paperclipai/adapter-claude-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import {
@@ -47,8 +50,6 @@ import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import { ReportsToPicker } from "./ReportsToPicker";
 import { EnvVarEditor } from "./EnvVarEditor";
 import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-config";
-import { AdapterFallbackChainEditor } from "./AdapterFallbackChainEditor";
-import type { AdapterFallbackChainEntryConfig } from "@paperclipai/adapter-utils";
 import { listAdapterOptions, listVisibleAdapterTypes } from "../adapters/metadata";
 import { getAdapterLabel } from "../adapters/adapter-display-registry";
 import { useDisabledAdaptersSync } from "../adapters/use-disabled-adapters";
@@ -188,7 +189,18 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     queryFn: () => secretsApi.list(selectedCompanyId!),
     enabled: Boolean(selectedCompanyId),
   });
+  const { data: experimentalSettings } = useQuery({
+    queryKey: queryKeys.instance.experimentalSettings,
+    queryFn: () => instanceSettingsApi.getExperimental(),
+    retry: false,
+  });
+  const environmentsEnabled = experimentalSettings?.enableEnvironments === true;
 
+  const { data: environments = [] } = useQuery<Environment[]>({
+    queryKey: selectedCompanyId ? queryKeys.environments.list(selectedCompanyId) : ["environments", "none"],
+    queryFn: () => environmentsApi.list(selectedCompanyId!),
+    enabled: Boolean(selectedCompanyId) && environmentsEnabled,
+  });
   const createSecret = useMutation({
     mutationFn: (input: { name: string; value: string }) => {
       if (!selectedCompanyId) throw new Error("Select a company to create secrets");
@@ -280,6 +292,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const showLegacyWorkingDirectoryField =
     isLocal && shouldShowLegacyWorkingDirectoryField({ isCreate, adapterConfig: config });
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
+  const supportedEnvironmentDrivers = useMemo(
+    () => new Set(supportedEnvironmentDriversForAdapter(adapterType)),
+    [adapterType],
+  );
+  const runnableEnvironments = useMemo(
+    () => environments.filter((environment) => supportedEnvironmentDrivers.has(environment.driver)),
+    [environments, supportedEnvironmentDrivers],
+  );
 
   // Fetch adapter models for the effective adapter type
   const {
@@ -293,6 +313,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     enabled: Boolean(selectedCompanyId),
   });
   const models = fetchedModels ?? externalModels ?? [];
+  const adapterCommandField =
+    adapterType === "hermes_local" ? "hermesCommand" : "command";
   const {
     data: detectedModelData,
     refetch: refetchDetectedModel,
@@ -348,7 +370,19 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       return uiAdapter.buildAdapterConfig(val!);
     }
     const base = config as Record<string, unknown>;
-    return { ...base, ...overlay.adapterConfig };
+    const next = { ...base, ...overlay.adapterConfig };
+    if (adapterType === "hermes_local") {
+      const hermesCommand =
+        typeof next.hermesCommand === "string" && next.hermesCommand.length > 0
+          ? next.hermesCommand
+          : typeof next.command === "string" && next.command.length > 0
+            ? next.command
+            : undefined;
+      if (hermesCommand) {
+        next.hermesCommand = hermesCommand;
+      }
+    }
+    return next;
   }
 
   const testEnvironment = useMutation({
@@ -420,11 +454,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       heartbeat: mergedHeartbeat,
     };
   }, [isCreate, overlay.heartbeat, runtimeConfig, val]);
-
-  const currentFallbackChain = isCreate
-    ? (val!.adapterFallbackChain ?? [])
-    : eff("adapterConfig", "adapterFallbackChain", Array.isArray(config.adapterFallbackChain) ? config.adapterFallbackChain : (config.rateLimitFallback ? [config.rateLimitFallback] : []) as AdapterFallbackChainEntryConfig[]);
-
+  const currentDefaultEnvironmentId = isCreate
+    ? val!.defaultEnvironmentId ?? ""
+    : eff("identity", "defaultEnvironmentId", props.agent.defaultEnvironmentId ?? "");
   return (
     <div className={cn("relative", cards && "space-y-6")}>
       {/* ---- Floating Save button (edit mode, when dirty) ---- */}
@@ -521,6 +553,42 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
         </div>
       )}
 
+      {/* ---- Execution ---- */}
+      {environmentsEnabled ? (
+        <div className={cn(!cards && (isCreate ? "border-t border-border" : "border-b border-border"))}>
+          {cards
+            ? <h3 className="text-sm font-medium mb-3">Execution</h3>
+            : <div className="px-4 py-2 text-xs font-medium text-muted-foreground">Execution</div>
+          }
+          <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+            <Field
+              label="Default environment"
+              hint="Agent-level default execution target. Project and issue settings can still override this."
+            >
+              <select
+                className={inputClass}
+                value={currentDefaultEnvironmentId}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (isCreate) {
+                    set!({ defaultEnvironmentId: nextValue });
+                    return;
+                  }
+                  mark("identity", "defaultEnvironmentId", nextValue || null);
+                }}
+              >
+                <option value="">Company default (Local)</option>
+                {runnableEnvironments.map((environment) => (
+                  <option key={environment.id} value={environment.id}>
+                    {environment.name} · {environment.driver}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </div>
+      ) : null}
+
       {/* ---- Adapter ---- */}
       <div className={cn(!cards && (isCreate ? "border-t border-border" : "border-b border-border"))}>
         <div className={cn(cards ? "flex items-center justify-between mb-3" : "px-4 py-2 flex items-center justify-between gap-2")}>
@@ -556,8 +624,6 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       nextValues.model = DEFAULT_CODEX_LOCAL_MODEL;
                       nextValues.dangerouslyBypassSandbox =
                         DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
-                    } else if (t === "claude_local") {
-                      nextValues.model = DEFAULT_CLAUDE_LOCAL_MODEL;
                     } else if (t === "gemini_local") {
                       nextValues.model = DEFAULT_GEMINI_LOCAL_MODEL;
                     } else if (t === "cursor") {
@@ -574,9 +640,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       adapterType: t,
                       adapterConfig: {
                         model:
-                          t === "claude_local"
-                            ? DEFAULT_CLAUDE_LOCAL_MODEL
-                            : t === "codex_local"
+                          t === "codex_local"
                             ? DEFAULT_CODEX_LOCAL_MODEL
                             : t === "gemini_local"
                               ? DEFAULT_GEMINI_LOCAL_MODEL
@@ -678,12 +742,20 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   value={
                     isCreate
                       ? val!.command
-                      : eff("adapterConfig", "command", String(config.command ?? ""))
+                      : eff(
+                          "adapterConfig",
+                          adapterCommandField,
+                          String(
+                            (adapterType === "hermes_local"
+                              ? config.hermesCommand ?? config.command
+                              : config.command) ?? "",
+                          ),
+                        )
                   }
                   onCommit={(v) =>
                     isCreate
                       ? set!({ command: v })
-                      : mark("adapterConfig", "command", v || null)
+                      : mark("adapterConfig", adapterCommandField, v || null)
                   }
                   immediate
                   className={inputClass}
@@ -729,24 +801,6 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                     ? fetchedModelsError.message
                     : "Failed to load adapter models."}
                 </p>
-              )}
-
-              {isLocal && (
-                <div className="pt-2 pb-2">
-                  <AdapterFallbackChainEditor
-                    companyId={selectedCompanyId!}
-                    primaryAdapterType={adapterType}
-                    chain={currentFallbackChain}
-                    onChange={(newChain) => {
-                      if (isCreate) {
-                        set!({ adapterFallbackChain: newChain });
-                        return;
-                      }
-                      mark("adapterConfig", "adapterFallbackChain", newChain.length > 0 ? newChain : []);
-                      mark("adapterConfig", "rateLimitFallback", null);
-                    }}
-                  />
-                </div>
               )}
 
               {showThinkingEffort && (
@@ -951,7 +1005,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   value={eff(
                     "heartbeat",
                     "maxConcurrentRuns",
-                    Number(heartbeat.maxConcurrentRuns ?? 1),
+                    Number(heartbeat.maxConcurrentRuns ?? AGENT_DEFAULT_MAX_CONCURRENT_RUNS),
                   )}
                   onCommit={(v) => mark("heartbeat", "maxConcurrentRuns", v)}
                   immediate

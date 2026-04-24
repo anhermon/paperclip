@@ -34,7 +34,6 @@ const mockAgentInstructionsService = vi.hoisted(() => ({
   deleteFile: vi.fn(),
   exportFiles: vi.fn(),
   ensureManagedBundle: vi.fn(),
-  recoverExistingManagedBundleConfig: vi.fn(async () => null),
 }));
 
 const mockBudgetService = vi.hoisted(() => ({
@@ -61,7 +60,6 @@ const mockInstanceSettingsService = vi.hoisted(() => ({
 const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
-  agentPoliciesService: vi.fn(() => ({})),
   agentService: () => mockAgentService,
   agentInstructionsService: () => mockAgentInstructionsService,
   accessService: () => mockAccessService,
@@ -83,7 +81,6 @@ vi.mock("../services/instance-settings.js", () => ({
 
 function registerModuleMocks() {
   vi.doMock("../services/index.js", () => ({
-    agentPoliciesService: vi.fn(() => ({})),
     agentService: () => mockAgentService,
     agentInstructionsService: () => mockAgentInstructionsService,
     accessService: () => mockAccessService,
@@ -134,7 +131,19 @@ async function createApp() {
     };
     next();
   });
-  app.use("/api", agentRoutes({} as any));
+  const db = {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(async () => [
+          {
+            id: "company-1",
+            requireBoardApprovalForNewAgents: false,
+          },
+        ]),
+      })),
+    })),
+  };
+  app.use("/api", agentRoutes(db as any));
   app.use(errorHandler);
   return app;
 }

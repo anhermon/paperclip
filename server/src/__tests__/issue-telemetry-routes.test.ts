@@ -27,13 +27,11 @@ function registerModuleMocks() {
   }));
 
   vi.doMock("../services/index.js", () => ({
-    agentPoliciesService: vi.fn(() => ({})),
     accessService: () => ({
       canUser: vi.fn(),
       hasPermission: vi.fn(),
     }),
     agentService: () => mockAgentService,
-    approvalService: () => ({}),
     documentService: () => ({}),
     executionWorkspaceService: () => ({}),
     feedbackService: () => ({}),
@@ -44,6 +42,19 @@ function registerModuleMocks() {
     }),
     instanceSettingsService: () => ({}),
     issueApprovalService: () => ({}),
+    issueReferenceService: () => ({
+      deleteDocumentSource: async () => undefined,
+      diffIssueReferenceSummary: () => ({
+        addedReferencedIssues: [],
+        removedReferencedIssues: [],
+        currentReferencedIssues: [],
+      }),
+      emptySummary: () => ({ outbound: [], inbound: [] }),
+      listIssueReferenceSummary: async () => ({ outbound: [], inbound: [] }),
+      syncComment: async () => undefined,
+      syncDocument: async () => undefined,
+      syncIssue: async () => undefined,
+    }),
     issueService: () => mockIssueService,
     logActivity: vi.fn(async () => undefined),
     projectService: () => ({}),
