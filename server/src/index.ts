@@ -23,7 +23,6 @@ import {
   companyMemberships,
   instanceUserRoles,
 } from "@paperclipai/db";
-import type { Db } from "@paperclipai/db";
 import detectPort from "detect-port";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -37,14 +36,16 @@ import {
   routineService,
 } from "./services/index.js";
 import { createFeedbackTraceShareClientFromConfig } from "./services/feedback-share-client.js";
-import { startTelegramEventBridge } from "./services/telegram-event-bridge.js";
-import { telegramNotify } from "./services/telegram-notify.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
 import { getBoardClaimWarningUrl, initializeBoardClaimChallenge } from "./board-claim.js";
 import { maybePersistWorktreeRuntimePorts } from "./worktree-config.js";
-import { initTracing } from "./observability/index.js";
 import { initTelemetry, getTelemetryClient } from "./telemetry.js";
+import { conflict } from "./errors.js";
+import type {
+  InstanceDatabaseBackupRunResult,
+  InstanceDatabaseBackupTrigger,
+} from "./routes/instance-database-backups.js";
 
 type BetterAuthSessionUser = {
   id: string;
@@ -84,9 +85,6 @@ export interface StartedServer {
 }
 
 export async function startServer(): Promise<StartedServer> {
-  // Initialize OTel tracing early (no-op if PAPERCLIP_OTEL_ENDPOINT is unset)
-  initTracing();
-
   let config = loadConfig();
   initTelemetry({ enabled: config.telemetryEnabled });
   if (process.env.PAPERCLIP_SECRETS_PROVIDER === undefined) {
@@ -203,7 +201,7 @@ export async function startServer(): Promise<StartedServer> {
   const LOCAL_BOARD_USER_EMAIL = "local@paperclip.local";
   const LOCAL_BOARD_USER_NAME = "Board";
   
-  async function ensureLocalTrustedBoardPrincipal(db: Db): Promise<void> {
+  async function ensureLocalTrustedBoardPrincipal(db: any): Promise<void> {
     const now = new Date();
     const existingUser = await db
       .select({ id: authUsers.id })
@@ -259,7 +257,8 @@ export async function startServer(): Promise<StartedServer> {
     }
   }
   
-  let db: Db;
+  let db;
+  let pluginMigrationDb;
   let embeddedPostgres: EmbeddedPostgresInstance | null = null;
   let embeddedPostgresStartedByThisProcess = false;
   let migrationSummary: MigrationSummary = "skipped";
@@ -269,9 +268,11 @@ export async function startServer(): Promise<StartedServer> {
     | { mode: "external-postgres"; connectionString: string }
     | { mode: "embedded-postgres"; dataDir: string; port: number };
   if (config.databaseUrl) {
-    migrationSummary = await ensureMigrations(config.databaseUrl, "PostgreSQL");
+    const migrationUrl = config.databaseMigrationUrl ?? config.databaseUrl;
+    migrationSummary = await ensureMigrations(migrationUrl, "PostgreSQL");
   
     db = createDb(config.databaseUrl);
+    pluginMigrationDb = config.databaseMigrationUrl ? createDb(config.databaseMigrationUrl) : db;
     logger.info("Using external PostgreSQL via DATABASE_URL/config");
     activeDatabaseConnectionString = config.databaseUrl;
     startupDbInfo = { mode: "external-postgres", connectionString: config.databaseUrl };
@@ -433,6 +434,7 @@ export async function startServer(): Promise<StartedServer> {
     });
   
     db = createDb(embeddedConnectionString);
+    pluginMigrationDb = db;
     logger.info("Embedded PostgreSQL ready");
     activeDatabaseConnectionString = embeddedConnectionString;
     resolvedEmbeddedPostgresPort = port;
@@ -473,7 +475,7 @@ export async function startServer(): Promise<StartedServer> {
     | ((headers: Headers) => Promise<BetterAuthSessionResult | null>)
     | undefined;
   if (config.deploymentMode === "local_trusted") {
-    await ensureLocalTrustedBoardPrincipal(db);
+    await ensureLocalTrustedBoardPrincipal(db as any);
   }
   if (config.deploymentMode === "authenticated") {
     const {
@@ -501,17 +503,16 @@ export async function startServer(): Promise<StartedServer> {
       },
       "Authenticated mode auth origin configuration",
     );
-    const auth = createBetterAuthInstance(db, config, effectiveTrustedOrigins);
+    const auth = createBetterAuthInstance(db as any, config, effectiveTrustedOrigins);
     betterAuthHandler = createBetterAuthHandler(auth);
     resolveSession = (req) => resolveBetterAuthSession(auth, req);
     resolveSessionFromHeaders = (headers) => resolveBetterAuthSessionFromHeaders(auth, headers);
-    await initializeBoardClaimChallenge(db, { deploymentMode: config.deploymentMode });
+    await initializeBoardClaimChallenge(db as any, { deploymentMode: config.deploymentMode });
     authReady = true;
   }
   
-  const requestedListenPort = config.port;
-  const listenPort = await detectPort(requestedListenPort);
-  if (listenPort !== requestedListenPort) {
+  const listenPort = await detectPort(config.port);
+  if (listenPort !== config.port) {
     config.port = listenPort;
   }
   if (resolvedEmbeddedPostgresPort !== null && resolvedEmbeddedPostgresPort !== config.embeddedPostgresPort) {
@@ -526,20 +527,90 @@ export async function startServer(): Promise<StartedServer> {
   });
   const uiMode = config.uiDevMiddleware ? "vite-dev" : config.serveUi ? "static" : "none";
   const storageService = createStorageServiceFromConfig(config);
-  const feedback = feedbackService(db, {
+  const feedback = feedbackService(db as any, {
     shareClient: createFeedbackTraceShareClientFromConfig(config),
   });
-  const app = await createApp(db, {
+  const backupSettingsSvc = instanceSettingsService(db);
+  let databaseBackupInFlight = false;
+  const runServerDatabaseBackup = async (
+    trigger: InstanceDatabaseBackupTrigger,
+  ): Promise<InstanceDatabaseBackupRunResult | null> => {
+    if (databaseBackupInFlight) {
+      const message = "Database backup already in progress";
+      if (trigger === "scheduled") {
+        logger.warn("Skipping scheduled database backup because a previous backup is still running");
+        return null;
+      }
+      throw conflict(message);
+    }
+
+    databaseBackupInFlight = true;
+    const startedAt = new Date();
+    const startedAtMs = Date.now();
+    const label = trigger === "scheduled" ? "Automatic" : "Manual";
+    try {
+      logger.info({ backupDir: config.databaseBackupDir, trigger }, `${label} database backup starting`);
+      // Read retention from Instance Settings (DB) so changes take effect without restart.
+      const generalSettings = await backupSettingsSvc.getGeneral();
+      const retention = generalSettings.backupRetention;
+
+      const result = await runDatabaseBackup({
+        connectionString: activeDatabaseConnectionString,
+        backupDir: config.databaseBackupDir,
+        retention,
+        filenamePrefix: "paperclip",
+      });
+      const finishedAt = new Date();
+      const response: InstanceDatabaseBackupRunResult = {
+        ...result,
+        trigger,
+        backupDir: config.databaseBackupDir,
+        retention,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        durationMs: Date.now() - startedAtMs,
+      };
+      logger.info(
+        {
+          backupFile: result.backupFile,
+          sizeBytes: result.sizeBytes,
+          prunedCount: result.prunedCount,
+          backupDir: config.databaseBackupDir,
+          retention,
+          trigger,
+          durationMs: response.durationMs,
+        },
+        `${label} database backup complete: ${formatDatabaseBackupResult(result)}`,
+      );
+      return response;
+    } catch (err) {
+      logger.error({ err, backupDir: config.databaseBackupDir, trigger }, `${label} database backup failed`);
+      throw err;
+    } finally {
+      databaseBackupInFlight = false;
+    }
+  };
+  const app = await createApp(db as any, {
     uiMode,
     serverPort: listenPort,
     storageService,
     feedbackExportService: feedback,
+    databaseBackupService: {
+      runManualBackup: async () => {
+        const result = await runServerDatabaseBackup("manual");
+        if (!result) {
+          throw conflict("Database backup already in progress");
+        }
+        return result;
+      },
+    },
     deploymentMode: config.deploymentMode,
     deploymentExposure: config.deploymentExposure,
     allowedHostnames: config.allowedHostnames,
     bindHost: config.host,
     authReady,
     companyDeletionEnabled: config.companyDeletionEnabled,
+    pluginMigrationDb: pluginMigrationDb as any,
     betterAuthHandler,
     resolveSession,
   });
@@ -551,8 +622,8 @@ export async function startServer(): Promise<StartedServer> {
   server.keepAliveTimeout = 185000;
   server.headersTimeout = 186000;
   
-  if (listenPort !== requestedListenPort) {
-    logger.warn(`Requested port is busy; using next free port (requestedPort=${requestedListenPort}, selectedPort=${listenPort})`);
+  if (listenPort !== config.port) {
+    logger.warn(`Requested port is busy; using next free port (requestedPort=${config.port}, selectedPort=${listenPort})`);
   }
   
   const runtimeListenHost = config.host;
@@ -566,14 +637,12 @@ export async function startServer(): Promise<StartedServer> {
     process.env.PAPERCLIP_API_URL = `http://${runtimeApiHost}:${listenPort}`;
   }
   
-  setupLiveEventsWebSocketServer(server, db, {
+  setupLiveEventsWebSocketServer(server, db as any, {
     deploymentMode: config.deploymentMode,
     resolveSessionFromHeaders,
   });
 
-  startTelegramEventBridge();
-
-  void reconcilePersistedRuntimeServicesOnStartup(db)
+  void reconcilePersistedRuntimeServicesOnStartup(db as any)
     .then((result) => {
       if (result.reconciled > 0) {
         logger.warn(
@@ -587,24 +656,33 @@ export async function startServer(): Promise<StartedServer> {
     });
   
   if (config.heartbeatSchedulerEnabled) {
-    const heartbeat = heartbeatService(db);
-    const routines = routineService(db);
+    const heartbeat = heartbeatService(db as any);
+    const routines = routineService(db as any);
   
     // Reap orphaned running runs at startup while in-memory execution state is empty,
-    // clear any stale executionRunId/checkoutRunId locks left over from a crash,
     // then resume any persisted queued runs that were waiting on the previous process.
     void heartbeat
       .reapOrphanedRuns()
-      .then(() => heartbeat.reapStaleExecutionRunLocks())
-      .then(() => heartbeat.resumeQueuedRuns())
-      .then(async () => {
+      .then(() => heartbeat.promoteDueScheduledRetries())
+      .then(async (promotion) => {
+        await heartbeat.resumeQueuedRuns();
         const reconciled = await heartbeat.reconcileStrandedAssignedIssues();
         if (
+          promotion.promoted > 0 ||
           reconciled.dispatchRequeued > 0 ||
           reconciled.continuationRequeued > 0 ||
           reconciled.escalated > 0
         ) {
-          logger.warn({ ...reconciled }, "startup stranded-issue reconciliation changed assigned issue state");
+          logger.warn(
+            { promotedScheduledRetries: promotion.promoted, promotedScheduledRetryRunIds: promotion.runIds, ...reconciled },
+            "startup heartbeat recovery changed assigned issue state",
+          );
+        }
+      })
+      .then(async () => {
+        const reconciled = await heartbeat.reconcileIssueGraphLiveness();
+        if (reconciled.escalationsCreated > 0) {
+          logger.warn({ ...reconciled }, "startup issue-graph liveness reconciliation created escalations");
         }
       })
       .catch((err) => {
@@ -632,21 +710,31 @@ export async function startServer(): Promise<StartedServer> {
         .catch((err) => {
           logger.error({ err }, "routine scheduler tick failed");
         });
-
-      // Periodically reap orphaned runs (5-min staleness threshold), clear any
-      // stale executionRunId locks, and drive queued work forward.
+  
+      // Periodically reap orphaned runs (5-min staleness threshold) and make sure
+      // persisted queued work is still being driven forward.
       void heartbeat
         .reapOrphanedRuns({ staleThresholdMs: 5 * 60 * 1000 })
-        .then(() => heartbeat.reapStaleExecutionRunLocks())
-        .then(() => heartbeat.resumeQueuedRuns())
-        .then(async () => {
+        .then(() => heartbeat.promoteDueScheduledRetries())
+        .then(async (promotion) => {
+          await heartbeat.resumeQueuedRuns();
           const reconciled = await heartbeat.reconcileStrandedAssignedIssues();
           if (
+            promotion.promoted > 0 ||
             reconciled.dispatchRequeued > 0 ||
             reconciled.continuationRequeued > 0 ||
             reconciled.escalated > 0
           ) {
-            logger.warn({ ...reconciled }, "periodic stranded-issue reconciliation changed assigned issue state");
+            logger.warn(
+              { promotedScheduledRetries: promotion.promoted, promotedScheduledRetryRunIds: promotion.runIds, ...reconciled },
+              "periodic heartbeat recovery changed assigned issue state",
+            );
+          }
+        })
+        .then(async () => {
+          const reconciled = await heartbeat.reconcileIssueGraphLiveness();
+          if (reconciled.escalationsCreated > 0) {
+            logger.warn({ ...reconciled }, "periodic issue-graph liveness reconciliation created escalations");
           }
         })
         .catch((err) => {
@@ -657,43 +745,6 @@ export async function startServer(): Promise<StartedServer> {
   
   if (config.databaseBackupEnabled) {
     const backupIntervalMs = config.databaseBackupIntervalMinutes * 60 * 1000;
-    const settingsSvc = instanceSettingsService(db);
-    let backupInFlight = false;
-
-    const runScheduledBackup = async () => {
-      if (backupInFlight) {
-        logger.warn("Skipping scheduled database backup because a previous backup is still running");
-        return;
-      }
-
-      backupInFlight = true;
-      try {
-        // Read retention from Instance Settings (DB) so changes take effect without restart
-        const generalSettings = await settingsSvc.getGeneral();
-        const retention = generalSettings.backupRetention;
-
-        const result = await runDatabaseBackup({
-          connectionString: activeDatabaseConnectionString,
-          backupDir: config.databaseBackupDir,
-          retention,
-          filenamePrefix: "paperclip",
-        });
-        logger.info(
-          {
-            backupFile: result.backupFile,
-            sizeBytes: result.sizeBytes,
-            prunedCount: result.prunedCount,
-            backupDir: config.databaseBackupDir,
-            retention,
-          },
-          `Automatic database backup complete: ${formatDatabaseBackupResult(result)}`,
-        );
-      } catch (err) {
-        logger.error({ err, backupDir: config.databaseBackupDir }, "Automatic database backup failed");
-      } finally {
-        backupInFlight = false;
-      }
-    };
 
     logger.info(
       {
@@ -704,7 +755,9 @@ export async function startServer(): Promise<StartedServer> {
       "Automatic database backups enabled",
     );
     setInterval(() => {
-      void runScheduledBackup();
+      void runServerDatabaseBackup("scheduled").catch(() => {
+        // runServerDatabaseBackup already logs the failure with context.
+      });
     }, backupIntervalMs);
   }
   
@@ -775,19 +828,8 @@ export async function startServer(): Promise<StartedServer> {
     });
   });
   
-  // Send a recovery / "back online" Telegram notification after a short delay.
-  // The delay debounces rapid restart flapping — if the server crashes within
-  // this window the notification is never sent.
-  const startupNotifyTimer = setTimeout(() => {
-    void telegramNotify.serverOnline({
-      url: process.env.PAPERCLIP_PUBLIC_URL || undefined,
-    });
-  }, 10_000);
-  startupNotifyTimer.unref();
-
   {
     const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
-      clearTimeout(startupNotifyTimer);
       const telemetryClient = getTelemetryClient();
       if (telemetryClient) {
         telemetryClient.stop();
