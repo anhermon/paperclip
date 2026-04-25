@@ -39,6 +39,16 @@ interface IngestBody {
   username?: string;
 }
 
+/** Escape HTML special characters to prevent injection in Telegram HTML messages */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function telegramRoutes(db: Db) {
   const router = Router();
   const svc = issueService(db);
@@ -68,7 +78,9 @@ export function telegramRoutes(db: Db) {
         const lines = list.map((r) => {
           const schedule = r.triggers.find((t) => t.kind === "schedule");
           const cronLabel = schedule?.label ?? schedule?.nextRunAt?.toISOString().slice(0, 16).replace("T", " ") ?? "—";
-          return `• <code>${r.id.slice(0, 8)}</code> <b>${r.title}</b> [${r.status}] ${cronLabel}`;
+          // P1 fix: Display full UUID so users can copy/paste to /run_routine
+          // P2 fix: Escape HTML in title and status to prevent injection
+          return `• <code>${r.id}</code> <b>${escapeHtml(r.title)}</b> [${escapeHtml(r.status)}] ${cronLabel}`;
         });
         await telegramNotify.send({
           text: `📋 <b>Routines (${list.length})</b>\n\n${lines.join("\n")}`,
@@ -83,6 +95,13 @@ export function telegramRoutes(db: Db) {
       if (runRoutineMatch) {
         const routineId = runRoutineMatch[1].trim();
         try {
+          // P0 security fix: Validate routine belongs to DEFAULT_COMPANY_ID before executing
+          const routine = await routines.get(routineId);
+          if (routine.companyId !== DEFAULT_COMPANY_ID) {
+            await telegramNotify.error(`❌ Routine ${routineId} not found or access denied`);
+            res.status(403).json({ error: "Routine not found or access denied" });
+            return;
+          }
           const run = await routines.runRoutine(routineId, { source: "manual" });
           await telegramNotify.info(
             `▶️ Routine triggered\nID: ${routineId}\nRun: ${run.id.slice(0, 8)} — status: ${run.status}`,
