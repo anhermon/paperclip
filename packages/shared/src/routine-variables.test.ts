@@ -40,7 +40,6 @@ describe("isValidRoutineVariableName", () => {
     expect(isValidRoutineVariableName("myVar")).toBe(true);
   });
 
-<<<<<<< HEAD
   it("returns true for name with underscore", () => {
     expect(isValidRoutineVariableName("my_var")).toBe(true);
   });
