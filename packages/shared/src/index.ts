@@ -543,21 +543,6 @@ export {
 } from "./workspace-commands.js";
 
 export {
-  sidebarOrderPreferenceSchema,
-  upsertSidebarOrderPreferenceSchema,
-  type UpsertSidebarOrderPreference,
-} from "./validators/sidebar-preferences.js";
-
-export { workspaceRuntimeControlTargetSchema } from "./validators/execution-workspace.js";
-export {
-  findWorkspaceCommandDefinition,
-  listWorkspaceCommandDefinitions,
-  listWorkspaceServiceCommandDefinitions,
-  matchWorkspaceRuntimeServiceToCommand,
-  scoreWorkspaceRuntimeServiceMatch,
-} from "./workspace-commands.js";
-
-export {
   DEFAULT_FEEDBACK_DATA_SHARING_PREFERENCE,
   FEEDBACK_TARGET_TYPES,
   FEEDBACK_DATA_SHARING_PREFERENCES,

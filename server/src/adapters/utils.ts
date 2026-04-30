@@ -29,6 +29,13 @@ export const ensureAbsoluteDirectory = serverUtils.ensureAbsoluteDirectory;
 export const ensureCommandResolvable = serverUtils.ensureCommandResolvable;
 export const resolveCommandForLogs = serverUtils.resolveCommandForLogs;
 
+type BuildInvocationEnvForLogsOptions = {
+  runtimeEnv?: Record<string, string>;
+  includeRuntimeKeys?: string[];
+  resolvedCommand?: string;
+  resolvedCommandEnvKey?: string;
+};
+
 export function buildInvocationEnvForLogs(
   env: Record<string, string>,
   options: BuildInvocationEnvForLogsOptions = {},
