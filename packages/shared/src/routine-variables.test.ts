@@ -6,6 +6,7 @@ import {
   syncRoutineVariablesWithTemplate,
   stringifyRoutineVariableValue,
   interpolateRoutineTemplate,
+  getBuiltinRoutineVariableValues,
   BUILTIN_ROUTINE_VARIABLE_NAMES,
 } from "./routine-variables.js";
 
@@ -16,6 +17,8 @@ import {
 describe("isBuiltinRoutineVariable", () => {
   it("returns true for 'date'", () => {
     expect(isBuiltinRoutineVariable("date")).toBe(true);
+    expect(isBuiltinRoutineVariable("timestamp")).toBe(true);
+    expect(isBuiltinRoutineVariable("repo")).toBe(false);
   });
 
   it("returns false for unknown variable", () => {
@@ -24,6 +27,7 @@ describe("isBuiltinRoutineVariable", () => {
 
   it("BUILTIN_ROUTINE_VARIABLE_NAMES set contains 'date'", () => {
     expect(BUILTIN_ROUTINE_VARIABLE_NAMES.has("date")).toBe(true);
+    expect(BUILTIN_ROUTINE_VARIABLE_NAMES.has("timestamp")).toBe(true);
   });
 });
 
@@ -36,6 +40,7 @@ describe("isValidRoutineVariableName", () => {
     expect(isValidRoutineVariableName("myVar")).toBe(true);
   });
 
+<<<<<<< HEAD
   it("returns true for name with underscore", () => {
     expect(isValidRoutineVariableName("my_var")).toBe(true);
   });
@@ -208,5 +213,31 @@ describe("interpolateRoutineTemplate", () => {
 
   it("handles numeric values", () => {
     expect(interpolateRoutineTemplate("Count: {{ n }}", { n: 5 })).toBe("Count: 5");
+  });
+
+  it("getBuiltinRoutineVariableValues returns a human-readable timestamp with year, time, and UTC", () => {
+    const values = getBuiltinRoutineVariableValues();
+    const year = String(new Date().getUTCFullYear());
+    expect(values.timestamp).toContain(year);
+    expect(values.timestamp).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)/);
+    expect(values.timestamp).toContain("UTC");
+  });
+
+  it("excludes built-in variables from syncRoutineVariablesWithTemplate", () => {
+    const result = syncRoutineVariablesWithTemplate(
+      "Daily report for {{date}} at {{timestamp}} — {{repo}}",
+      [],
+    );
+    expect(result).toEqual([
+      { name: "repo", label: null, type: "text", defaultValue: null, required: true, options: [] },
+    ]);
+  });
+
+  it("interpolates built-in variables alongside user variables", () => {
+    const builtins = getBuiltinRoutineVariableValues();
+    const allVars = { ...builtins, repo: "paperclip" };
+    expect(
+      interpolateRoutineTemplate("Report for {{date}} ({{timestamp}}) on {{repo}}", allVars),
+    ).toBe(`Report for ${builtins.date} (${builtins.timestamp}) on paperclip`);
   });
 });

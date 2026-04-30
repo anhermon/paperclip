@@ -3,8 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     projects: [
-      "packages/adapter-utils",
+      "packages/shared",
       "packages/db",
+      "packages/adapter-utils",
       "packages/mcp-server",
       "packages/adapters/claude-local",
       "packages/adapters/codex-local",
@@ -13,7 +14,6 @@ export default defineConfig({
       "packages/adapters/opencode-local",
       "packages/adapters/openclaw-gateway",
       "packages/adapters/pi-local",
-      "packages/shared",
       "packages/plugins/sdk",
       "server",
       "ui",
