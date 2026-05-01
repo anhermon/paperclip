@@ -24,6 +24,39 @@ export interface AdapterRuntime {
 }
 
 // ---------------------------------------------------------------------------
+// Adapter failure and fallback types
+// ---------------------------------------------------------------------------
+
+export type AdapterFailureCategory =
+  | "auth_required"
+  | "rate_limited"
+  | "session_invalid"
+  | "startup_failed"
+  | "timeout"
+  | "provider_unavailable"
+  | "process_lost"
+  | "crash_no_output"
+  | "parse_error"
+  | "cancelled"
+  | "nonzero_exit"
+  | "unknown";
+
+/**
+ * A single entry in the adapter fallback chain stored in `adapterConfig`.
+ * When the primary adapter fails with a category listed in `triggerOn`
+ * (or any category when `triggerOn` is omitted), the heartbeat runner
+ * retries the run using the fallback adapter configuration.
+ */
+export interface AdapterFallbackEntry {
+  adapterType: string;
+  adapterConfig?: Record<string, unknown>;
+  /** Limit this fallback to specific failure categories. Omit to match any failure. */
+  triggerOn?: AdapterFailureCategory[];
+  /** Maximum attempts for this fallback entry. Defaults to 1. */
+  maxAttempts?: number;
+}
+
+// ---------------------------------------------------------------------------
 // Execution types (moved from server/src/adapters/types.ts)
 // ---------------------------------------------------------------------------
 
@@ -31,6 +64,16 @@ export interface UsageSummary {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens?: number;
+  /** Tokens written to the Anthropic prompt cache this heartbeat (billed at 1.25× normal). */
+  cacheCreationInputTokens?: number;
+}
+
+export interface SkillInvocationReport {
+  skillName: string;
+  status: "success" | "error";
+  durationMs?: number;
+  tokenEstimate?: number;
+  version?: string | null;
 }
 
 export type AdapterBillingType =
@@ -91,6 +134,7 @@ export interface AdapterExecutionResult {
   runtimeServices?: AdapterRuntimeServiceReport[];
   summary?: string | null;
   clearSession?: boolean;
+  skillInvocations?: SkillInvocationReport[];
   question?: {
     prompt: string;
     choices: Array<{
@@ -107,6 +151,40 @@ export interface AdapterSessionCodec {
   getDisplayId?: (params: Record<string, unknown> | null) => string | null;
 }
 
+/**
+ * Cognitive role of a heartbeat context fragment.
+ *
+ * | Class       | What it contains                                       | Source of truth                          | Retention              |
+ * |-------------|--------------------------------------------------------|------------------------------------------|------------------------|
+ * | episodic    | Time-ordered events: run summaries, comment history,   | heartbeat_runs.resultJson,               | Rolling window;        |
+ * |             | status changes                                         | issue_comments, heartbeat_run_events     | oldest drops first     |
+ * | semantic    | Meaning about entities: issue descriptions, project    | issues.description, projects,            | Stable until entity    |
+ * |             | goals, agent capabilities                              | agents.capabilities                      | changes                |
+ * | procedural  | How to do things: skills, agent instructions,          | company_skills,                          | Stable; changes with   |
+ * |             | workflow patterns                                      | adapterConfig.instructionsFilePath       | config updates         |
+ * | transient   | Only valid for the current run: wake context,          | contextSnapshot, agentTaskSessions,      | Discarded after run;   |
+ * |             | session handoff note, workspace state                  | paperclipSessionHandoffMarkdown          | never persisted        |
+ */
+export type HeartbeatMemoryClass = "episodic" | "semantic" | "procedural" | "transient";
+
+/**
+ * A single layer of context assembled during a heartbeat invocation.
+ * Layers are recorded in AdapterInvocationMeta for observability and
+ * can be annotated with a {@link HeartbeatMemoryClass} to support
+ * class-aware context selection.
+ */
+export interface AdapterInvocationLayer {
+  key: string;
+  title: string;
+  kind: "context" | "prompt" | "adapter";
+  summary?: string | null;
+  chars?: number;
+  includedInPrompt?: boolean;
+  metadata?: Record<string, unknown> | null;
+  /** Cognitive role of this layer. Used to filter/prioritise context inputs. */
+  memoryClass?: HeartbeatMemoryClass;
+}
+
 export interface AdapterInvocationMeta {
   adapterType: string;
   command: string;
@@ -116,6 +194,7 @@ export interface AdapterInvocationMeta {
   env?: Record<string, string>;
   prompt?: string;
   promptMetrics?: Record<string, number>;
+  heartbeatLayers?: AdapterInvocationLayer[];
   context?: Record<string, unknown>;
 }
 
@@ -220,6 +299,7 @@ export interface AdapterSkillContext {
   companyId: string;
   adapterType: string;
   config: Record<string, unknown>;
+  agentUrlKey?: string | null;
 }
 
 export interface AdapterEnvironmentTestContext {
@@ -440,6 +520,13 @@ export interface CLIAdapterModule {
 // UI config form values (moved from ui/src/components/AgentConfigForm.tsx)
 // ---------------------------------------------------------------------------
 
+export interface AdapterFallbackChainEntryConfig {
+  adapterType: string;
+  model?: string;
+  adapterConfig?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
 export interface CreateConfigValues {
   adapterType: string;
   cwd: string;
@@ -474,6 +561,9 @@ export interface CreateConfigValues {
   worktreeParentDir?: string;
   runtimeServicesJson?: string;
   defaultEnvironmentId?: string;
+  /** @deprecated Use adapterFallbackChain instead */
+  fallbackToCodexOnRateLimit?: boolean;
+  adapterFallbackChain?: AdapterFallbackChainEntryConfig[];
   maxTurnsPerRun: number;
   heartbeatEnabled: boolean;
   intervalSec: number;

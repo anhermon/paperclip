@@ -322,19 +322,19 @@ describe("MarkdownEditor", () => {
   it("anchors the mention menu inside the visual viewport when mobile offsets are present", () => {
     expect(
       computeMentionMenuPosition(
-        { viewportTop: 180, viewportLeft: 120 },
+        { viewportTop: 180, viewportBottom: 300, viewportLeft: 120 },
         { offsetLeft: 24, offsetTop: 320, width: 320, height: 260 },
       ),
     ).toEqual({
       top: 372,
-      left: 144,
+      left: 154,
     });
   });
 
   it("clamps the mention menu back into view near the viewport edges", () => {
     expect(
       computeMentionMenuPosition(
-        { viewportTop: 260, viewportLeft: 240 },
+        { viewportTop: 260, viewportBottom: 280, viewportLeft: 240 },
         { offsetLeft: 0, offsetTop: 0, width: 280, height: 220 },
       ),
     ).toEqual({
@@ -346,13 +346,13 @@ describe("MarkdownEditor", () => {
   it("keeps a short mention menu on the same line when it fits below the caret", () => {
     expect(
       computeMentionMenuPosition(
-        { viewportTop: 160, viewportLeft: 120 },
+        { viewportTop: 160, viewportBottom: 180, viewportLeft: 120 },
         { offsetLeft: 0, offsetTop: 0, width: 320, height: 220 },
         { width: 188, height: 42 },
       ),
     ).toEqual({
-      top: 164,
-      left: 120,
+      top: 160,
+      left: 130,
     });
   });
 

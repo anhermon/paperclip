@@ -21,6 +21,10 @@ function createIssue(overrides: Partial<Issue> = {}) {
     ancestors: [],
     updatedAt: new Date("2026-04-12T12:00:00.000Z"),
     ...overrides,
+    projectWorkspaceId: overrides.projectWorkspaceId ?? null,
+    executionWorkspaceId: overrides.executionWorkspaceId ?? null,
+    executionWorkspacePreference: overrides.executionWorkspacePreference ?? null,
+    executionWorkspaceSettings: overrides.executionWorkspaceSettings ?? null,
   };
 }
 

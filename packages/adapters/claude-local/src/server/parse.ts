@@ -1,7 +1,8 @@
-import type { UsageSummary } from "@paperclipai/adapter-utils";
+import type { UsageSummary, SkillInvocationReport } from "@paperclipai/adapter-utils";
 import {
   asString,
   asNumber,
+  asBoolean,
   parseObject,
   parseJson,
 } from "@paperclipai/adapter-utils/server-utils";
@@ -19,6 +20,11 @@ export function parseClaudeStreamJson(stdout: string) {
   let model = "";
   let finalResult: Record<string, unknown> | null = null;
   const assistantTexts: string[] = [];
+
+  // Track skill invocations: pending (tool_use seen, no result yet) and completed.
+  type PendingSkill = { skillName: string; startTime: number };
+  const pendingSkills = new Map<string, PendingSkill>();
+  const skillInvocations: SkillInvocationReport[] = [];
 
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -44,6 +50,29 @@ export function parseClaudeStreamJson(stdout: string) {
           const text = asString(block.text, "");
           if (text) assistantTexts.push(text);
         }
+        if (asString(block.type, "") === "tool_use" && asString(block.name, "") === "Skill") {
+          const toolId = asString(block.id, "");
+          const input = parseObject(block.input);
+          const skillName = asString(input.skill, "") || "unknown";
+          if (toolId) {
+            pendingSkills.set(toolId, { skillName, startTime: Date.now() });
+          }
+        }
+      }
+      continue;
+    }
+
+    if (type === "tool_result") {
+      const toolUseId = asString(event.tool_use_id, "");
+      const pending = toolUseId ? pendingSkills.get(toolUseId) : undefined;
+      if (pending) {
+        pendingSkills.delete(toolUseId);
+        const isError = asBoolean(event.is_error, false);
+        skillInvocations.push({
+          skillName: pending.skillName,
+          status: isError ? "error" : "success",
+          durationMs: Date.now() - pending.startTime,
+        });
       }
       continue;
     }
@@ -54,6 +83,15 @@ export function parseClaudeStreamJson(stdout: string) {
     }
   }
 
+  // Orphaned skill tool_use (no matching tool_result) → mark as error.
+  for (const pending of pendingSkills.values()) {
+    skillInvocations.push({
+      skillName: pending.skillName,
+      status: "error",
+      durationMs: Date.now() - pending.startTime,
+    });
+  }
+
   if (!finalResult) {
     return {
       sessionId,
@@ -62,6 +100,7 @@ export function parseClaudeStreamJson(stdout: string) {
       usage: null as UsageSummary | null,
       summary: assistantTexts.join("\n\n").trim(),
       resultJson: null as Record<string, unknown> | null,
+      skillInvocations,
     };
   }
 
@@ -82,6 +121,7 @@ export function parseClaudeStreamJson(stdout: string) {
     usage,
     summary,
     resultJson: finalResult,
+    skillInvocations,
   };
 }
 
@@ -379,5 +419,29 @@ export function isClaudeTransientUpstreamError(input: {
 
   const haystack = buildClaudeTransientHaystack(input);
   if (!haystack) return false;
+  return CLAUDE_TRANSIENT_UPSTREAM_RE.test(haystack);
+}
+
+export function detectClaudeRateLimited(input: {
+  parsed: Record<string, unknown> | null;
+  stdout: string;
+  stderr: string;
+}): boolean {
+  // Check for JSON-based rate-limit signals emitted as stream events.
+  for (const rawLine of input.stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const event = parseJson(line);
+    if (!event) continue;
+    if (asString(event.type, "") === "rate_limit_event") return true;
+    if (event.rate_limit_info !== undefined && event.rate_limit_info !== null) return true;
+  }
+
+  // Fall back to text-haystack check using the transient upstream regex.
+  const haystack = buildClaudeTransientHaystack({
+    parsed: input.parsed,
+    stdout: input.stdout,
+    stderr: input.stderr,
+  });
   return CLAUDE_TRANSIENT_UPSTREAM_RE.test(haystack);
 }

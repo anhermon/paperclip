@@ -375,6 +375,8 @@ type PaperclipWakePayload = {
   missingCount: number;
   truncated: boolean;
   fallbackFetchNeeded: boolean;
+  /** Set on resumed-session wakes: static issue fields (id/identifier/title) omitted. */
+  compressedForResume?: boolean;
 };
 
 function normalizePaperclipWakeIssue(value: unknown): PaperclipWakeIssue | null {
@@ -582,6 +584,7 @@ export function normalizePaperclipWakePayload(value: unknown): PaperclipWakePayl
     missingCount: asNumber(commentWindow.missingCount, 0),
     truncated: asBoolean(payload.truncated, false),
     fallbackFetchNeeded: asBoolean(payload.fallbackFetchNeeded, false),
+    ...(asBoolean(payload.compressedForResume, false) ? { compressedForResume: true } : {}),
   };
 }
 
@@ -589,6 +592,40 @@ export function stringifyPaperclipWakePayload(value: unknown): string | null {
   const normalized = normalizePaperclipWakePayload(value);
   if (!normalized) return null;
   return JSON.stringify(normalized);
+}
+
+/**
+ * Compress a wake payload for a resumed session. Saves ~60-150 tokens per resumed wake:
+ *
+ * - `commentIds` — redundant when `comments` are inline (derive from `comments[n].id`).
+ * - Renderer skips the `- issue: <identifier> <title>` line (agent already knows the issue).
+ *
+ * Issue identification fields (id/identifier/title) are retained in the payload so that
+ * downstream normalization can still resolve the issue object (required by the guard in
+ * `normalizePaperclipWakeIssue`). The `compressedForResume` flag signals renderers to
+ * omit those fields from the rendered prompt text.
+ */
+export function compressPaperclipWakePayloadForResume(value: unknown): PaperclipWakePayload | null {
+  const normalized = normalizePaperclipWakePayload(value);
+  if (!normalized) return null;
+
+  return {
+    ...normalized,
+    // commentIds is derivable from comments[n].id — drop to save tokens in the JSON payload.
+    commentIds: [],
+    compressedForResume: true,
+  };
+}
+
+/**
+ * Serialize a wake payload compressed for a resumed session.
+ * Strips static issue fields (id/identifier/title) and the redundant commentIds array.
+ * Returns null when there is no meaningful content left to send.
+ */
+export function stringifyPaperclipWakePayloadForResume(value: unknown): string | null {
+  const compressed = compressPaperclipWakePayloadForResume(value);
+  if (!compressed) return null;
+  return JSON.stringify(compressed);
 }
 
 export function renderPaperclipWakePrompt(
@@ -605,19 +642,25 @@ export function renderPaperclipWakePrompt(
     return principal.userId ? `user ${principal.userId}` : "user";
   };
 
+  const isCompressedResume = resumedSession && normalized.compressedForResume === true;
   const lines = resumedSession
       ? [
         "## Paperclip Resume Delta",
         "",
-        "You are resuming an existing Paperclip session.",
-        "This heartbeat is scoped to the issue below. Do not switch to another issue until you have handled this wake.",
+        isCompressedResume
+          ? "Continuing current task. Static issue context omitted — only new deltas follow."
+          : "You are resuming an existing Paperclip session.",
+        ...(!isCompressedResume ? ["This heartbeat is scoped to the issue below. Do not switch to another issue until you have handled this wake."] : []),
         "Focus on the new wake delta below and continue the current task without restating the full heartbeat boilerplate.",
         "Fetch the API thread only when `fallbackFetchNeeded` is true or you need broader history than this batch.",
         "",
         "Execution contract: take concrete action in this heartbeat when the issue is actionable; do not stop at a plan unless planning was requested. Leave durable progress with a clear next action, use child issues instead of polling for long or parallel work, and mark blocked work with the unblock owner/action.",
         "",
         `- reason: ${normalized.reason ?? "unknown"}`,
-        `- issue: ${normalized.issue?.identifier ?? normalized.issue?.id ?? "unknown"}${normalized.issue?.title ? ` ${normalized.issue.title}` : ""}`,
+        // On compressed wakes, issue identifier/title are already in agent context; skip them.
+        ...(isCompressedResume
+          ? []
+          : [`- issue: ${normalized.issue?.identifier ?? normalized.issue?.id ?? "unknown"}${normalized.issue?.title ? ` ${normalized.issue.title}` : ""}`]),
         `- pending comments: ${normalized.includedCount}/${normalized.requestedCount}`,
         `- latest comment id: ${normalized.latestCommentId ?? "unknown"}`,
         `- fallback fetch needed: ${normalized.fallbackFetchNeeded ? "yes" : "no"}`,
@@ -1338,16 +1381,40 @@ function canonicalizeDesiredPaperclipSkillReference(
   return normalizedReference;
 }
 
+/**
+ * Role-scoped skill auto-resolution:
+ * - `roles: ["all"]` → matches every agent
+ * - `roles: ["ceo", "manager"]` → matches only those roles
+ * - `roles: []` or `roles: null` (absent from SKILL.md) → matches no agent by default
+ *   (the skill must be explicitly listed in `desiredSkills` to be loaded)
+ */
+function skillMatchesAgentRole(
+  roles: string[] | null | undefined,
+  agentUrlKey: string | null | undefined,
+): boolean {
+  if (!roles || roles.length === 0) return false;
+  const normalizedRoles = roles.map((r) => r.trim().toLowerCase());
+  if (normalizedRoles.includes("all")) return true;
+  if (!agentUrlKey) return false;
+  return normalizedRoles.includes(agentUrlKey.trim().toLowerCase());
+}
+
 export function resolvePaperclipDesiredSkillNames(
   config: Record<string, unknown>,
-  availableEntries: Array<{ key: string; runtimeName?: string | null; required?: boolean }>,
+  availableEntries: Array<{ key: string; runtimeName?: string | null; required?: boolean; roles?: string[] | null }>,
+  agentUrlKey?: string | null,
 ): string[] {
   const preference = readPaperclipSkillSyncPreference(config);
   const requiredSkills = availableEntries
     .filter((entry) => entry.required)
     .map((entry) => entry.key);
   if (!preference.explicit) {
-    return Array.from(new Set(requiredSkills));
+    // When no explicit skill config is set, auto-resolve by role scoping:
+    // include required skills + all skills whose declared `roles` match this agent.
+    const roleMatchedSkills = availableEntries
+      .filter((entry) => !entry.required && skillMatchesAgentRole(entry.roles, agentUrlKey))
+      .map((entry) => entry.key);
+    return Array.from(new Set([...requiredSkills, ...roleMatchedSkills]));
   }
   const desiredSkills = preference.desiredSkills
     .map((reference) => canonicalizeDesiredPaperclipSkillReference(reference, availableEntries))

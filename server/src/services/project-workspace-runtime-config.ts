@@ -21,13 +21,6 @@ function readServiceStates(value: unknown): ProjectWorkspaceRuntimeConfig["servi
   return Object.fromEntries(entries) as ProjectWorkspaceRuntimeConfig["serviceStates"];
 }
 
-function readServiceStates(value: unknown): ProjectWorkspaceRuntimeConfig["serviceStates"] {
-  if (!isRecord(value)) return null;
-  const entries = Object.entries(value).filter(([, state]) => state === "running" || state === "stopped");
-  if (entries.length === 0) return null;
-  return Object.fromEntries(entries) as ProjectWorkspaceRuntimeConfig["serviceStates"];
-}
-
 /** Parses a ProjectWorkspaceRuntimeConfig from a workspace metadata record, returning null if no config is present. */
 export function readProjectWorkspaceRuntimeConfig(
   metadata: Record<string, unknown> | null | undefined,

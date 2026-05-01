@@ -75,6 +75,7 @@ function createSummary(overrides: Partial<ProjectWorkspaceSummary> = {}): Projec
     serviceCount: overrides.serviceCount ?? 2,
     runningServiceCount: overrides.runningServiceCount ?? 0,
     primaryServiceUrl: overrides.primaryServiceUrl ?? "http://127.0.0.1:62474",
+    primaryServiceUrlRunning: overrides.primaryServiceUrlRunning ?? false,
     hasRuntimeConfig: overrides.hasRuntimeConfig ?? true,
     issues: overrides.issues ?? [
       createIssue({ id: "issue-1", identifier: "PAP-1364" }),
