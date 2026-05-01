@@ -5,16 +5,19 @@ import type {
   AdapterEnvironmentTestResult,
   CompanySecret,
   EnvBinding,
+  Environment,
 } from "@paperclipai/shared";
+import { AGENT_DEFAULT_MAX_CONCURRENT_RUNS, supportedEnvironmentDriversForAdapter } from "@paperclipai/shared";
 import type { AdapterModel } from "../api/agents";
 import { agentsApi } from "../api/agents";
+import { environmentsApi } from "../api/environments";
+import { instanceSettingsApi } from "../api/instanceSettings";
 import { secretsApi } from "../api/secrets";
 import { assetsApi } from "../api/assets";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CLAUDE_LOCAL_MODEL } from "@paperclipai/adapter-claude-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import {
@@ -38,6 +41,7 @@ import {
   help,
   adapterLabels,
 } from "./agent-config-primitives";
+import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { defaultCreateValues } from "./agent-config-defaults";
 import { getUIAdapter } from "../adapters";
 import { ClaudeLocalAdvancedFields } from "../adapters/claude-local/config-fields";
@@ -47,10 +51,8 @@ import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import { ReportsToPicker } from "./ReportsToPicker";
 import { EnvVarEditor } from "./EnvVarEditor";
 import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-config";
-import { AdapterFallbackChainEditor } from "./AdapterFallbackChainEditor";
-import type { AdapterFallbackChainEntryConfig } from "@paperclipai/adapter-utils";
 import { listAdapterOptions, listVisibleAdapterTypes } from "../adapters/metadata";
-import { getAdapterLabel } from "../adapters/adapter-display-registry";
+import { getAdapterDisplay, getAdapterLabel } from "../adapters/adapter-display-registry";
 import { useDisabledAdaptersSync } from "../adapters/use-disabled-adapters";
 import { buildAgentUpdatePatch, type AgentConfigOverlay } from "../lib/agent-config-patch";
 import { useAdapterCapabilities } from "../adapters/use-adapter-capabilities";
@@ -69,6 +71,12 @@ type AgentConfigFormProps = {
   onDirtyChange?: (dirty: boolean) => void;
   onSaveActionChange?: (save: (() => void) | null) => void;
   onCancelActionChange?: (cancel: (() => void) | null) => void;
+  onTestActionChange?: (test: (() => void) | null) => void;
+  onTestActionStateChange?: (state: { disabled: boolean; pending: boolean }) => void;
+  onTestFeedbackChange?: (feedback: {
+    errorMessage: string | null;
+    result: AdapterEnvironmentTestResult | null;
+  }) => void;
   hideInlineSave?: boolean;
   showAdapterTypeField?: boolean;
   showAdapterTestEnvironmentButton?: boolean;
@@ -110,7 +118,8 @@ function isOverlayDirty(o: AgentConfigOverlay): boolean {
     o.adapterType !== undefined ||
     Object.keys(o.adapterConfig).length > 0 ||
     Object.keys(o.heartbeat).length > 0 ||
-    Object.keys(o.runtime).length > 0
+    Object.keys(o.runtime).length > 0 ||
+    o.modelProfiles?.cheap !== undefined
   );
 }
 
@@ -175,6 +184,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const cards = props.sectionLayout === "cards";
   const showAdapterTypeField = props.showAdapterTypeField ?? true;
   const showAdapterTestEnvironmentButton = props.showAdapterTestEnvironmentButton ?? true;
+  const showInlineAdapterTestEnvironmentButton =
+    showAdapterTestEnvironmentButton && !props.onTestActionChange;
+  const showInlineAdapterTestEnvironmentFeedback = !props.onTestFeedbackChange;
   const showCreateRunPolicySection = props.showCreateRunPolicySection ?? true;
   const hideInstructionsFile = props.hideInstructionsFile ?? false;
   const { selectedCompanyId } = useCompany();
@@ -188,7 +200,18 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     queryFn: () => secretsApi.list(selectedCompanyId!),
     enabled: Boolean(selectedCompanyId),
   });
+  const { data: experimentalSettings } = useQuery({
+    queryKey: queryKeys.instance.experimentalSettings,
+    queryFn: () => instanceSettingsApi.getExperimental(),
+    retry: false,
+  });
+  const environmentsEnabled = experimentalSettings?.enableEnvironments === true;
 
+  const { data: environments = [] } = useQuery<Environment[]>({
+    queryKey: selectedCompanyId ? queryKeys.environments.list(selectedCompanyId) : ["environments", "none"],
+    queryFn: () => environmentsApi.list(selectedCompanyId!),
+    enabled: Boolean(selectedCompanyId) && environmentsEnabled,
+  });
   const createSecret = useMutation({
     mutationFn: (input: { name: string; value: string }) => {
       if (!selectedCompanyId) throw new Error("Select a company to create secrets");
@@ -223,15 +246,17 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
 
   const isDirty = !isCreate && isOverlayDirty(overlay);
 
+  type RecordOverlayGroup = "identity" | "adapterConfig" | "heartbeat" | "runtime";
+
   /** Read effective value: overlay if dirty, else original */
-  function eff<T>(group: keyof Omit<AgentConfigOverlay, "adapterType">, field: string, original: T): T {
+  function eff<T>(group: RecordOverlayGroup, field: string, original: T): T {
     const o = overlay[group];
     if (field in o) return o[field] as T;
     return original;
   }
 
   /** Mark field dirty in overlay */
-  function mark(group: keyof Omit<AgentConfigOverlay, "adapterType">, field: string, value: unknown) {
+  function mark(group: RecordOverlayGroup, field: string, value: unknown) {
     setOverlay((prev) => ({
       ...prev,
       [group]: { ...prev[group], [field]: value },
@@ -280,19 +305,37 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const showLegacyWorkingDirectoryField =
     isLocal && shouldShowLegacyWorkingDirectoryField({ isCreate, adapterConfig: config });
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
+  const supportedEnvironmentDrivers = useMemo(
+    () => new Set(supportedEnvironmentDriversForAdapter(adapterType)),
+    [adapterType],
+  );
+  const runnableEnvironments = useMemo(
+    () => environments.filter((environment) => {
+      if (!supportedEnvironmentDrivers.has(environment.driver)) return false;
+      if (environment.driver !== "sandbox") return true;
+      const provider = typeof environment.config?.provider === "string" ? environment.config.provider : null;
+      return provider !== null && provider !== "fake";
+    }),
+    [environments, supportedEnvironmentDrivers],
+  );
 
   // Fetch adapter models for the effective adapter type
+  const modelQueryKey = selectedCompanyId
+    ? queryKeys.agents.adapterModels(selectedCompanyId, adapterType)
+    : ["agents", "none", "adapter-models", adapterType];
   const {
     data: fetchedModels,
     error: fetchedModelsError,
   } = useQuery({
-    queryKey: selectedCompanyId
-      ? queryKeys.agents.adapterModels(selectedCompanyId, adapterType)
-      : ["agents", "none", "adapter-models", adapterType],
+    queryKey: modelQueryKey,
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType),
     enabled: Boolean(selectedCompanyId),
   });
+  const [refreshModelsError, setRefreshModelsError] = useState<string | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const models = fetchedModels ?? externalModels ?? [];
+  const adapterCommandField =
+    adapterType === "hermes_local" ? "hermesCommand" : "command";
   const {
     data: detectedModelData,
     refetch: refetchDetectedModel,
@@ -335,7 +378,29 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const [runPolicyAdvancedOpen, setRunPolicyAdvancedOpen] = useState(false);
   // Popover states
   const [modelOpen, setModelOpen] = useState(false);
+  const [cheapModelOpen, setCheapModelOpen] = useState(false);
   const [thinkingEffortOpen, setThinkingEffortOpen] = useState(false);
+
+  // Cheap model profile state — only relevant when the adapter advertises
+  // `supportsModelProfiles`. Defaults are sourced from the adapter's
+  // /model-profiles endpoint so the UI does not encode adapter-specific
+  // cheap defaults.
+  const supportsModelProfiles = adapterCaps.supportsModelProfiles;
+  const { data: adapterCheapProfileDefinitions } = useQuery({
+    queryKey: selectedCompanyId
+      ? queryKeys.agents.adapterModelProfiles(selectedCompanyId, adapterType)
+      : ["agents", "none", "adapter-model-profiles", adapterType],
+    queryFn: () => agentsApi.adapterModelProfiles(selectedCompanyId!, adapterType),
+    enabled: Boolean(selectedCompanyId) && supportsModelProfiles,
+  });
+  const adapterCheapDefault = useMemo(() => {
+    return (adapterCheapProfileDefinitions ?? []).find((profile) => profile.key === "cheap") ?? null;
+  }, [adapterCheapProfileDefinitions]);
+  const adapterCheapDefaultModel = useMemo(() => {
+    const adapterConfig = adapterCheapDefault?.adapterConfig ?? {};
+    const value = (adapterConfig as Record<string, unknown>).model;
+    return typeof value === "string" ? value : "";
+  }, [adapterCheapDefault]);
 
   // Create mode helpers
   const val = isCreate ? props.values : null;
@@ -348,7 +413,19 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       return uiAdapter.buildAdapterConfig(val!);
     }
     const base = config as Record<string, unknown>;
-    return { ...base, ...overlay.adapterConfig };
+    const next = { ...base, ...overlay.adapterConfig };
+    if (adapterType === "hermes_local") {
+      const hermesCommand =
+        typeof next.hermesCommand === "string" && next.hermesCommand.length > 0
+          ? next.hermesCommand
+          : typeof next.command === "string" && next.command.length > 0
+            ? next.command
+            : undefined;
+      if (hermesCommand) {
+        next.hermesCommand = hermesCommand;
+      }
+    }
+    return next;
   }
 
   const testEnvironment = useMutation({
@@ -356,16 +433,81 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       if (!selectedCompanyId) {
         throw new Error("Select a company to test adapter environment");
       }
+      const selectedEnvironmentId = isCreate
+        ? val!.defaultEnvironmentId ?? null
+        : eff("identity", "defaultEnvironmentId", props.agent.defaultEnvironmentId ?? null);
       return agentsApi.testEnvironment(selectedCompanyId, adapterType, {
         adapterConfig: buildAdapterConfigForTest(),
+        environmentId:
+          typeof selectedEnvironmentId === "string" && selectedEnvironmentId.length > 0
+            ? selectedEnvironmentId
+            : null,
       });
     },
   });
+  const testEnvironmentDisabled = testEnvironment.isPending || !selectedCompanyId;
+  const triggerTestEnvironment = useCallback(() => {
+    if (testEnvironmentDisabled) return;
+    testEnvironment.mutate();
+  }, [testEnvironment.mutate, testEnvironmentDisabled]);
+
+  useEffect(() => {
+    if (!showAdapterTestEnvironmentButton || !props.onTestActionChange) return;
+    props.onTestActionChange(triggerTestEnvironment);
+    return () => {
+      props.onTestActionChange?.(null);
+    };
+  }, [showAdapterTestEnvironmentButton, props.onTestActionChange, triggerTestEnvironment]);
+
+  useEffect(() => {
+    if (!showAdapterTestEnvironmentButton || !props.onTestActionStateChange) return;
+    props.onTestActionStateChange({
+      disabled: testEnvironmentDisabled,
+      pending: testEnvironment.isPending,
+    });
+    return () => {
+      props.onTestActionStateChange?.({ disabled: true, pending: false });
+    };
+  }, [
+    showAdapterTestEnvironmentButton,
+    props.onTestActionStateChange,
+    testEnvironmentDisabled,
+    testEnvironment.isPending,
+  ]);
+
+  useEffect(() => {
+    if (!props.onTestFeedbackChange) return;
+    props.onTestFeedbackChange({
+      errorMessage: testEnvironment.error instanceof Error
+        ? testEnvironment.error.message
+        : testEnvironment.error
+          ? "Environment test failed"
+          : null,
+      result: testEnvironment.data ?? null,
+    });
+    return () => {
+      props.onTestFeedbackChange?.({ errorMessage: null, result: null });
+    };
+  }, [props.onTestFeedbackChange, testEnvironment.data, testEnvironment.error]);
 
   // Current model for display
   const currentModelId = isCreate
     ? val!.model
     : eff("adapterConfig", "model", String(config.model ?? ""));
+
+  async function handleRefreshModels() {
+    if (!selectedCompanyId) return;
+    setRefreshingModels(true);
+    setRefreshModelsError(null);
+    try {
+      const refreshed = await agentsApi.adapterModels(selectedCompanyId, adapterType, { refresh: true });
+      queryClient.setQueryData(modelQueryKey, refreshed);
+    } catch (error) {
+      setRefreshModelsError(error instanceof Error ? error.message : "Failed to refresh adapter models.");
+    } finally {
+      setRefreshingModels(false);
+    }
+  }
 
   const thinkingEffortKey =
     adapterType === "codex_local"
@@ -400,6 +542,69 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const codexSearchEnabled = adapterType === "codex_local"
     ? (isCreate ? Boolean(val!.search) : eff("adapterConfig", "search", Boolean(config.search)))
     : false;
+  // Cheap profile read/write helpers. Edit-mode values come from
+  // runtimeConfig.modelProfiles.cheap with overlay overrides on top; create-mode
+  // values come straight from CreateConfigValues (cheapModel + cheapModelEnabled).
+  const cheapProfileFromAgent = useMemo(() => {
+    const profiles = (runtimeConfig.modelProfiles ?? {}) as Record<string, unknown>;
+    const cheap = (profiles.cheap ?? {}) as Record<string, unknown>;
+    const cheapAdapterConfig = (cheap.adapterConfig ?? {}) as Record<string, unknown>;
+    return {
+      enabled: cheap.enabled !== false,
+      model: typeof cheapAdapterConfig.model === "string" ? cheapAdapterConfig.model : "",
+    };
+  }, [runtimeConfig]);
+  const cheapOverlay = !isCreate ? overlay.modelProfiles?.cheap : undefined;
+  const currentCheapEnabled = isCreate
+    ? val!.cheapModelEnabled ?? false
+    : cheapOverlay?.enabled ?? cheapProfileFromAgent.enabled;
+  const currentCheapModel = isCreate
+    ? val!.cheapModel ?? ""
+    : (() => {
+        const overlayModel = (cheapOverlay?.adapterConfig as Record<string, unknown> | undefined)?.model;
+        if (typeof overlayModel === "string") return overlayModel;
+        return cheapProfileFromAgent.model;
+      })();
+
+  function setCheapEnabled(next: boolean) {
+    if (isCreate) {
+      set!({ cheapModelEnabled: next });
+      return;
+    }
+    setOverlay((prev) => ({
+      ...prev,
+      modelProfiles: {
+        cheap: {
+          ...(prev.modelProfiles?.cheap ?? {}),
+          enabled: next,
+        },
+      },
+    }));
+  }
+
+  function setCheapModel(next: string) {
+    if (isCreate) {
+      set!({ cheapModel: next });
+      return;
+    }
+    setOverlay((prev) => {
+      const existing = prev.modelProfiles?.cheap ?? {};
+      const nextAdapterConfig = {
+        ...((existing.adapterConfig ?? {}) as Record<string, unknown>),
+        model: next || undefined,
+      };
+      return {
+        ...prev,
+        modelProfiles: {
+          cheap: {
+            ...existing,
+            adapterConfig: nextAdapterConfig,
+          },
+        },
+      };
+    });
+  }
+
   const effectiveRuntimeConfig = useMemo(() => {
     if (isCreate) {
       return {
@@ -420,11 +625,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       heartbeat: mergedHeartbeat,
     };
   }, [isCreate, overlay.heartbeat, runtimeConfig, val]);
-
-  const currentFallbackChain = isCreate
-    ? (val!.adapterFallbackChain ?? [])
-    : eff("adapterConfig", "adapterFallbackChain", Array.isArray(config.adapterFallbackChain) ? config.adapterFallbackChain : (config.rateLimitFallback ? [config.rateLimitFallback] : []) as AdapterFallbackChainEntryConfig[]);
-
+  const currentDefaultEnvironmentId = isCreate
+    ? val!.defaultEnvironmentId ?? ""
+    : eff("identity", "defaultEnvironmentId", props.agent.defaultEnvironmentId ?? "");
   return (
     <div className={cn("relative", cards && "space-y-6")}>
       {/* ---- Floating Save button (edit mode, when dirty) ---- */}
@@ -521,6 +724,42 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
         </div>
       )}
 
+      {/* ---- Execution ---- */}
+      {environmentsEnabled ? (
+        <div className={cn(!cards && (isCreate ? "border-t border-border" : "border-b border-border"))}>
+          {cards
+            ? <h3 className="text-sm font-medium mb-3">Execution</h3>
+            : <div className="px-4 py-2 text-xs font-medium text-muted-foreground">Execution</div>
+          }
+          <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+            <Field
+              label="Default environment"
+              hint="Agent-level default execution target. Project and issue settings can still override this."
+            >
+              <select
+                className={inputClass}
+                value={currentDefaultEnvironmentId}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  if (isCreate) {
+                    set!({ defaultEnvironmentId: nextValue });
+                    return;
+                  }
+                  mark("identity", "defaultEnvironmentId", nextValue || null);
+                }}
+              >
+                <option value="">Company default (Local)</option>
+                {runnableEnvironments.map((environment) => (
+                  <option key={environment.id} value={environment.id}>
+                    {environment.name} · {environment.driver}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </div>
+      ) : null}
+
       {/* ---- Adapter ---- */}
       <div className={cn(!cards && (isCreate ? "border-t border-border" : "border-b border-border"))}>
         <div className={cn(cards ? "flex items-center justify-between mb-3" : "px-4 py-2 flex items-center justify-between gap-2")}>
@@ -528,16 +767,16 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             ? <h3 className="text-sm font-medium">Adapter</h3>
             : <span className="text-xs font-medium text-muted-foreground">Adapter</span>
           }
-          {showAdapterTestEnvironmentButton && (
+          {showInlineAdapterTestEnvironmentButton && (
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="h-7 px-2.5 text-xs"
-              onClick={() => testEnvironment.mutate()}
-              disabled={testEnvironment.isPending || !selectedCompanyId}
+              onClick={triggerTestEnvironment}
+              disabled={testEnvironmentDisabled}
             >
-              {testEnvironment.isPending ? "Testing..." : "Test environment"}
+              {testEnvironment.isPending ? "Testing..." : "Test"}
             </Button>
           )}
         </div>
@@ -556,8 +795,6 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       nextValues.model = DEFAULT_CODEX_LOCAL_MODEL;
                       nextValues.dangerouslyBypassSandbox =
                         DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
-                    } else if (t === "claude_local") {
-                      nextValues.model = DEFAULT_CLAUDE_LOCAL_MODEL;
                     } else if (t === "gemini_local") {
                       nextValues.model = DEFAULT_GEMINI_LOCAL_MODEL;
                     } else if (t === "cursor") {
@@ -572,11 +809,10 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                     setOverlay((prev) => ({
                       ...prev,
                       adapterType: t,
+                      modelProfiles: { cheap: { cleared: true } },
                       adapterConfig: {
                         model:
-                          t === "claude_local"
-                            ? DEFAULT_CLAUDE_LOCAL_MODEL
-                            : t === "codex_local"
+                          t === "codex_local"
                             ? DEFAULT_CODEX_LOCAL_MODEL
                             : t === "gemini_local"
                               ? DEFAULT_GEMINI_LOCAL_MODEL
@@ -601,7 +837,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             </Field>
           )}
 
-          {testEnvironment.error && (
+          {showInlineAdapterTestEnvironmentFeedback && testEnvironment.error && (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               {testEnvironment.error instanceof Error
                 ? testEnvironment.error.message
@@ -609,7 +845,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             </div>
           )}
 
-          {testEnvironment.data && (
+          {showInlineAdapterTestEnvironmentFeedback && testEnvironment.data && (
             <AdapterEnvironmentResult result={testEnvironment.data} />
           )}
 
@@ -638,28 +874,6 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
             </Field>
           )}
 
-          {/* Prompt template (create mode only — edit mode shows this in Identity) */}
-          {isLocal && isCreate && (
-            <>
-              <Field label="Prompt Template" hint={help.promptTemplate}>
-                <MarkdownEditor
-                  value={val!.promptTemplate}
-                  onChange={(v) => set!({ promptTemplate: v })}
-                  placeholder="You are agent {{ agent.name }}. Your role is {{ agent.role }}..."
-                  contentClassName="min-h-[88px] text-sm font-mono"
-                  imageUploadHandler={async (file) => {
-                    const namespace = "agents/drafts/prompt-template";
-                    const asset = await uploadMarkdownImage.mutateAsync({ file, namespace });
-                    return asset.contentPath;
-                  }}
-                />
-              </Field>
-              <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                Prompt template is replayed on every heartbeat. Prefer small task framing and variables like <code>{"{{ context.* }}"}</code> or <code>{"{{ run.* }}"}</code>; avoid repeating stable instructions here.
-              </div>
-            </>
-          )}
-
           {/* Adapter-specific fields are rendered inside Permissions & Configuration */}
         </div>
 
@@ -678,12 +892,20 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   value={
                     isCreate
                       ? val!.command
-                      : eff("adapterConfig", "command", String(config.command ?? ""))
+                      : eff(
+                          "adapterConfig",
+                          adapterCommandField,
+                          String(
+                            (adapterType === "hermes_local"
+                              ? config.hermesCommand ?? config.command
+                              : config.command) ?? "",
+                          ),
+                        )
                   }
                   onCommit={(v) =>
                     isCreate
                       ? set!({ command: v })
-                      : mark("adapterConfig", "command", v || null)
+                      : mark("adapterConfig", adapterCommandField, v || null)
                   }
                   immediate
                   className={inputClass}
@@ -700,6 +922,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 />
               </Field>
 
+              {supportsModelProfiles && (
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Primary model</div>
+              )}
               <ModelDropdown
                 models={models}
                 value={currentModelId}
@@ -720,33 +945,32 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   const result = await refetchDetectedModel();
                   return result.data?.model ?? null;
                 }}
+                onRefreshModels={adapterType === "codex_local" ? handleRefreshModels : undefined}
+                refreshingModels={refreshingModels}
                 detectModelLabel="Detect model"
                 emptyDetectHint="No model detected. Select or enter one manually."
               />
-              {fetchedModelsError && (
+              {(refreshModelsError || fetchedModelsError) && (
                 <p className="text-xs text-destructive">
-                  {fetchedModelsError instanceof Error
-                    ? fetchedModelsError.message
-                    : "Failed to load adapter models."}
+                  {refreshModelsError
+                    ?? (fetchedModelsError instanceof Error
+                      ? fetchedModelsError.message
+                      : "Failed to load adapter models.")}
                 </p>
               )}
 
-              {isLocal && (
-                <div className="pt-2 pb-2">
-                  <AdapterFallbackChainEditor
-                    companyId={selectedCompanyId!}
-                    primaryAdapterType={adapterType}
-                    chain={currentFallbackChain}
-                    onChange={(newChain) => {
-                      if (isCreate) {
-                        set!({ adapterFallbackChain: newChain });
-                        return;
-                      }
-                      mark("adapterConfig", "adapterFallbackChain", newChain.length > 0 ? newChain : []);
-                      mark("adapterConfig", "rateLimitFallback", null);
-                    }}
-                  />
-                </div>
+              {supportsModelProfiles && (
+                <CheapModelSection
+                  enabled={currentCheapEnabled}
+                  model={currentCheapModel}
+                  models={models}
+                  adapterType={adapterType}
+                  adapterDefaultModel={adapterCheapDefaultModel}
+                  onEnabledChange={setCheapEnabled}
+                  onModelChange={setCheapModel}
+                  open={cheapModelOpen}
+                  onOpenChange={setCheapModelOpen}
+                />
               )}
 
               {showThinkingEffort && (
@@ -951,7 +1175,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   value={eff(
                     "heartbeat",
                     "maxConcurrentRuns",
-                    Number(heartbeat.maxConcurrentRuns ?? 1),
+                    Number(heartbeat.maxConcurrentRuns ?? AGENT_DEFAULT_MAX_CONCURRENT_RUNS),
                   )}
                   onCommit={(v) => mark("heartbeat", "maxConcurrentRuns", v)}
                   immediate
@@ -968,7 +1192,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   );
 }
 
-function AdapterEnvironmentResult({ result }: { result: AdapterEnvironmentTestResult }) {
+export function AdapterEnvironmentResult({ result }: { result: AdapterEnvironmentTestResult }) {
   const statusLabel =
     result.status === "pass" ? "Passed" : result.status === "warn" ? "Warnings" : "Failed";
   const statusClass =
@@ -1015,6 +1239,7 @@ function AdapterTypeDropdown({
   disabledTypes: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
+  const selectedDisplay = getAdapterDisplay(value);
   const adapterList = useMemo(
     () =>
       listAdapterOptions((type) => adapterLabels[type] ?? getAdapterLabel(type)).filter(
@@ -1027,9 +1252,10 @@ function AdapterTypeDropdown({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-sm hover:bg-accent/50 transition-colors w-full justify-between">
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex min-w-0 items-center gap-1.5">
             {value === "opencode_local" ? <OpenCodeLogoIcon className="h-3.5 w-3.5" /> : null}
-            <span>{adapterLabels[value] ?? getAdapterLabel(value)}</span>
+            <span className="truncate">{adapterLabels[value] ?? getAdapterLabel(value)}</span>
+            {selectedDisplay.experimental && <ExperimentalBadge />}
           </span>
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </button>
@@ -1056,6 +1282,7 @@ function AdapterTypeDropdown({
             <span className="inline-flex items-center gap-1.5">
               {item.value === "opencode_local" ? <OpenCodeLogoIcon className="h-3.5 w-3.5" /> : null}
               <span>{item.label}</span>
+              {item.experimental && <ExperimentalBadge />}
             </span>
             {item.comingSoon && (
               <span className="text-[10px] text-muted-foreground">Coming soon</span>
@@ -1064,6 +1291,14 @@ function AdapterTypeDropdown({
         ))}
       </PopoverContent>
     </Popover>
+  );
+}
+
+function ExperimentalBadge() {
+  return (
+    <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700 dark:text-amber-200">
+      Experimental
+    </span>
   );
 }
 
@@ -1080,8 +1315,11 @@ function ModelDropdown({
   detectedModel,
   detectedModelCandidates,
   onDetectModel,
+  onRefreshModels,
+  refreshingModels,
   detectModelLabel,
   emptyDetectHint,
+  defaultLabel,
 }: {
   models: AdapterModel[];
   value: string;
@@ -1095,8 +1333,11 @@ function ModelDropdown({
   detectedModel?: string | null;
   detectedModelCandidates?: string[];
   onDetectModel?: () => Promise<string | null>;
+  onRefreshModels?: () => Promise<void>;
+  refreshingModels?: boolean;
   detectModelLabel?: string;
   emptyDetectHint?: string;
+  defaultLabel?: string;
 }) {
   const [modelSearch, setModelSearch] = useState("");
   const [detectingModel, setDetectingModel] = useState(false);
@@ -1183,7 +1424,8 @@ function ModelDropdown({
             <span className={cn(!value && "text-muted-foreground")}>
               {selected
                 ? selected.label
-                : value || (allowDefault ? "Default" : required ? "Select model (required)" : "Select model")}
+                : value
+                  || (allowDefault ? (defaultLabel ?? "Default") : required ? "Select model (required)" : "Select model")}
             </span>
             <ChevronDown className="h-3 w-3 text-muted-foreground" />
           </button>
@@ -1224,6 +1466,24 @@ function ModelDropdown({
                 <path d="M3 3v5h5" />
               </svg>
               {detectingModel ? "Detecting..." : detectedModel ? (detectModelLabel?.replace(/^Detect\b/, "Re-detect") ?? "Re-detect from config") : (detectModelLabel ?? "Detect from config")}
+            </button>
+          )}
+          {onRefreshModels && !modelSearch.trim() && (
+            <button
+              type="button"
+              className="flex items-center gap-1.5 w-full px-2 py-1.5 text-xs rounded hover:bg-accent/50 text-muted-foreground"
+              onClick={() => {
+                void onRefreshModels();
+              }}
+              disabled={refreshingModels}
+            >
+              <svg aria-hidden="true" focusable="false" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 0 1 15.28-6.36L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-15.28 6.36L3 16" />
+                <path d="M8 16H3v5" />
+              </svg>
+              {refreshingModels ? "Refreshing..." : "Refresh models"}
             </button>
           )}
           {value && (!models.some((m) => m.id === value) || promotedModelIds.has(value)) && (
@@ -1358,6 +1618,72 @@ function ModelDropdown({
         </PopoverContent>
       </Popover>
     </Field>
+  );
+}
+
+function CheapModelSection({
+  enabled,
+  model,
+  models,
+  adapterType,
+  adapterDefaultModel,
+  onEnabledChange,
+  onModelChange,
+  open,
+  onOpenChange,
+}: {
+  enabled: boolean;
+  model: string;
+  models: AdapterModel[];
+  adapterType: string;
+  adapterDefaultModel: string;
+  onEnabledChange: (next: boolean) => void;
+  onModelChange: (next: string) => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const placeholderHint = adapterDefaultModel
+    ? `Adapter default · ${adapterDefaultModel}`
+    : "No adapter default — choose a cheaper model";
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Cheap model</div>
+          <p className="text-xs text-muted-foreground">
+            Used when a run requests the cheap profile (e.g. routine summaries). The primary model stays unchanged.
+          </p>
+        </div>
+        <ToggleSwitch checked={enabled} onCheckedChange={onEnabledChange} />
+      </div>
+      {enabled ? (
+        <ModelDropdown
+          models={models}
+          value={model}
+          onChange={onModelChange}
+          open={open}
+          onOpenChange={onOpenChange}
+          allowDefault
+          required={false}
+          groupByProvider={adapterType === "opencode_local"}
+          creatable
+          detectedModel={null}
+          detectedModelCandidates={[]}
+          emptyDetectHint={placeholderHint}
+          defaultLabel={placeholderHint}
+        />
+      ) : null}
+      {enabled && !model && adapterDefaultModel ? (
+        <p className="text-[11px] text-muted-foreground">
+          No explicit cheap model selected — runtime falls back to <code>{adapterDefaultModel}</code>.
+        </p>
+      ) : null}
+      {enabled && !model && !adapterDefaultModel ? (
+        <p className="text-[11px] text-amber-500">
+          No cheap model selected and the adapter has no default. Cheap-lane runs will continue on the primary model with a fallback note.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
