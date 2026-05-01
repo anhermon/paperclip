@@ -2,6 +2,9 @@
 // Minimal adapter-facing interfaces (no drizzle dependency)
 // ---------------------------------------------------------------------------
 
+import type { SshRemoteExecutionSpec } from "./ssh.js";
+import type { AdapterExecutionTarget } from "./execution-target.js";
+
 export interface AdapterAgent {
   id: string;
   companyId: string;
@@ -21,29 +24,9 @@ export interface AdapterRuntime {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical adapter failure taxonomy
+// Adapter failure and fallback types
 // ---------------------------------------------------------------------------
 
-/**
- * Provider-agnostic failure categories emitted by all local adapters.
- * Adapters MUST map their provider-specific failures to these codes so the
- * heartbeat runner can apply a uniform fallback / retry policy.
- *
- * | Category             | When to use                                              |
- * |----------------------|----------------------------------------------------------|
- * | auth_required        | CLI requires re-login / credentials missing              |
- * | rate_limited         | Provider quota or rate-limit hit (retry later)           |
- * | session_invalid      | Saved session is stale and cannot be resumed             |
- * | startup_failed       | Process exited early with no usable output               |
- * | timeout              | Execution wall-clock limit reached                      |
- * | provider_unavailable | Provider binary missing or service unreachable           |
- * | process_lost         | Process disappeared mid-run (DETACHED_PROCESS_ERROR)     |
- * | crash_no_output      | Process crashed before producing any structured output   |
- * | parse_error          | Output could not be parsed as expected format            |
- * | cancelled            | Run was cancelled by the orchestrator                    |
- * | nonzero_exit         | Process exited with non-zero code, no specific category  |
- * | unknown              | Failure reason could not be determined                   |
- */
 export type AdapterFailureCategory =
   | "auth_required"
   | "rate_limited"
@@ -85,6 +68,14 @@ export interface UsageSummary {
   cacheCreationInputTokens?: number;
 }
 
+export interface SkillInvocationReport {
+  skillName: string;
+  status: "success" | "error";
+  durationMs?: number;
+  tokenEstimate?: number;
+  version?: string | null;
+}
+
 export type AdapterBillingType =
   | "api"
   | "subscription"
@@ -116,13 +107,7 @@ export interface AdapterRuntimeServiceReport {
   healthStatus?: "unknown" | "healthy" | "unhealthy";
 }
 
-export interface SkillInvocationReport {
-  skillName: string;
-  status: "success" | "error";
-  durationMs?: number;
-  tokenEstimate?: number;
-  version?: string | null;
-}
+export type AdapterExecutionErrorFamily = "transient_upstream";
 
 export interface AdapterExecutionResult {
   exitCode: number | null;
@@ -130,6 +115,8 @@ export interface AdapterExecutionResult {
   timedOut: boolean;
   errorMessage?: string | null;
   errorCode?: string | null;
+  errorFamily?: AdapterExecutionErrorFamily | null;
+  retryNotBefore?: string | null;
   errorMeta?: Record<string, unknown>;
   usage?: UsageSummary;
   /**
@@ -217,6 +204,14 @@ export interface AdapterExecutionContext {
   runtime: AdapterRuntime;
   config: Record<string, unknown>;
   context: Record<string, unknown>;
+  executionTarget?: AdapterExecutionTarget | null;
+  /**
+   * Legacy remote transport view. Prefer `executionTarget`, which is the
+   * provider-neutral contract produced by core runtime code.
+   */
+  executionTransport?: {
+    remoteExecution?: Record<string, unknown> | null;
+  };
   onLog: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
   onMeta?: (meta: AdapterInvocationMeta) => Promise<void>;
   onSpawn?: (meta: { pid: number; processGroupId: number | null; startedAt: string }) => Promise<void>;
@@ -226,6 +221,16 @@ export interface AdapterExecutionContext {
 export interface AdapterModel {
   id: string;
   label: string;
+}
+
+export type AdapterModelProfileKey = "cheap";
+
+export interface AdapterModelProfileDefinition {
+  key: AdapterModelProfileKey;
+  label: string;
+  description?: string;
+  adapterConfig: Record<string, unknown>;
+  source?: "adapter_default" | "discovered";
 }
 
 export type AdapterEnvironmentCheckLevel = "info" | "warn" | "error";
@@ -294,7 +299,6 @@ export interface AdapterSkillContext {
   companyId: string;
   adapterType: string;
   config: Record<string, unknown>;
-  /** Normalized agent URL key (e.g. "cto", "ceo") used for role-based skill scoping. */
   agentUrlKey?: string | null;
 }
 
@@ -302,6 +306,20 @@ export interface AdapterEnvironmentTestContext {
   companyId: string;
   adapterType: string;
   config: Record<string, unknown>;
+  /**
+   * Optional execution target the adapter should run probes against.
+   *
+   * If omitted (or `kind === "local"`), the adapter tests on the Paperclip
+   * host. For SSH/sandbox targets the adapter should run command/auth probes
+   * inside the remote environment so the result reflects what an agent run
+   * would actually see at execution time.
+   */
+  executionTarget?: AdapterExecutionTarget | null;
+  /**
+   * Friendly name of the environment being tested (when `executionTarget` is set).
+   * Surfaced in check messages so users see which environment the probe ran in.
+   */
+  environmentName?: string | null;
   deployment?: {
     mode?: "local_trusted" | "authenticated";
     exposure?: "private" | "public";
@@ -401,6 +419,15 @@ export interface ServerAdapterModule {
   supportsLocalAgentJwt?: boolean;
   models?: AdapterModel[];
   listModels?: () => Promise<AdapterModel[]>;
+  modelProfiles?: AdapterModelProfileDefinition[];
+  listModelProfiles?: () => Promise<AdapterModelProfileDefinition[]>;
+  /**
+   * Optional explicit refresh hook for model discovery.
+   * Use this when the adapter caches discovered models and needs a bypass path
+   * so the UI can fetch newly released models without waiting for cache expiry
+   * or a Paperclip code update.
+   */
+  refreshModels?: () => Promise<AdapterModel[]>;
   agentConfigurationDoc?: string;
   /**
    * Optional lifecycle hook when an agent is approved/hired (join-request or hire_agent approval).
@@ -483,6 +510,7 @@ export type StdoutLineParser = (line: string, ts: string) => TranscriptEntry[];
 // ---------------------------------------------------------------------------
 // CLI types (moved from cli/src/adapters/types.ts)
 // ---------------------------------------------------------------------------
+
 export interface CLIAdapterModule {
   type: string;
   formatStdoutEvent: (line: string, debug: boolean) => void;
@@ -506,6 +534,14 @@ export interface CreateConfigValues {
   promptTemplate: string;
   model: string;
   thinkingEffort: string;
+  /**
+   * Optional cheap model profile config for new agents on adapters that
+   * support model profiles. Persisted under
+   * `runtimeConfig.modelProfiles.cheap.adapterConfig`, never on the primary
+   * `adapterConfig`.
+   */
+  cheapModel?: string;
+  cheapModelEnabled?: boolean;
   chrome: boolean;
   dangerouslySkipPermissions: boolean;
   search: boolean;
@@ -524,9 +560,9 @@ export interface CreateConfigValues {
   workspaceBranchTemplate?: string;
   worktreeParentDir?: string;
   runtimeServicesJson?: string;
+  defaultEnvironmentId?: string;
   /** @deprecated Use adapterFallbackChain instead */
   fallbackToCodexOnRateLimit?: boolean;
-  /** Ordered list of fallback adapters tried on rate-limit errors */
   adapterFallbackChain?: AdapterFallbackChainEntryConfig[];
   maxTurnsPerRun: number;
   heartbeatEnabled: boolean;
