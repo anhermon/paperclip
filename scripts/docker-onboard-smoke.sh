@@ -30,6 +30,7 @@ cleanup() {
   fi
   if [[ "$PRESERVE_CONTAINER_ON_EXIT" != "true" ]]; then
     docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
     rm -rf "$TMP_DIR"
@@ -93,7 +94,7 @@ generate_bootstrap_invite_url() {
       -e PAPERCLIP_PUBLIC_URL="$PAPERCLIP_PUBLIC_URL" \
       -e PAPERCLIP_HOME="/paperclip" \
       "$CONTAINER_NAME" bash -lc \
-      'timeout 20s npx --yes "paperclipai@${PAPERCLIPAI_VERSION}" auth bootstrap-ceo --data-dir "$PAPERCLIP_HOME" --base-url "$PAPERCLIP_PUBLIC_URL"' \
+      'timeout 20s paperclipai auth bootstrap-ceo --data-dir "$PAPERCLIP_HOME" --base-url "$PAPERCLIP_PUBLIC_URL"' \
       2>&1
   )"; then
     bootstrap_status=0
@@ -259,7 +260,7 @@ fi
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-docker run -d --rm \
+docker run -d \
   --name "$CONTAINER_NAME" \
   -p "$HOST_PORT:3100" \
   -e HOST=0.0.0.0 \
@@ -280,6 +281,12 @@ COOKIE_JAR="$TMP_DIR/cookies.txt"
 
 if ! wait_for_http "$PAPERCLIP_PUBLIC_URL/api/health" 90 1; then
   echo "Smoke bootstrap failed: server did not become ready at $PAPERCLIP_PUBLIC_URL/api/health" >&2
+  echo "==> Container logs:" >&2
+  docker logs "$CONTAINER_NAME" >&2 || true
+  if [[ -n "$SMOKE_METADATA_FILE" ]]; then
+    mkdir -p "$(dirname "$SMOKE_METADATA_FILE")"
+    printf 'SMOKE_CONTAINER_NAME=%q\n' "$CONTAINER_NAME" > "$SMOKE_METADATA_FILE"
+  fi
   exit 1
 fi
 

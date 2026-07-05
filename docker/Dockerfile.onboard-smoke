@@ -32,9 +32,12 @@ RUN apt-get update \
   && chown -R paperclip:paperclip /paperclip /home/paperclip \
   && rm -rf /var/lib/apt/lists/*
 
+# Pre-install paperclipai at build time so container startup doesn't block on npm download
+RUN npm install -g "paperclipai@${PAPERCLIPAI_VERSION}"
+
 VOLUME ["/paperclip"]
 WORKDIR /home/paperclip/workspace
 EXPOSE 3100
 USER paperclip
 
-CMD ["bash", "-lc", "set -euo pipefail; mkdir -p \"$PAPERCLIP_HOME\"; npx --yes \"paperclipai@${PAPERCLIPAI_VERSION}\" onboard --yes --data-dir \"$PAPERCLIP_HOME\""]
+CMD ["bash", "-lc", "set -euo pipefail; mkdir -p \"$PAPERCLIP_HOME\"; paperclipai onboard --yes --data-dir \"$PAPERCLIP_HOME\""]
