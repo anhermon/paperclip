@@ -24,7 +24,7 @@ RUN apt-get update \
   && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends nodejs \
+  && apt-get install -y --no-install-recommends nodejs git \
   && locale-gen en_US.UTF-8 \
   && groupadd --gid 10001 paperclip \
   && useradd --create-home --shell /bin/bash --uid "${HOST_UID}" --gid 10001 paperclip \
@@ -32,8 +32,10 @@ RUN apt-get update \
   && chown -R paperclip:paperclip /paperclip /home/paperclip \
   && rm -rf /var/lib/apt/lists/*
 
-# Pre-install paperclipai at build time so container startup doesn't block on npm download
-RUN npm install -g "paperclipai@${PAPERCLIPAI_VERSION}"
+# Pre-install paperclipai at build time so container startup doesn't block on npm download.
+# Fix ownership so the non-root 'paperclip' user can write @embedded-postgres native symlinks at runtime.
+RUN npm install -g "paperclipai@${PAPERCLIPAI_VERSION}" \
+  && chown -R paperclip:paperclip "$(npm root -g)/paperclipai"
 
 VOLUME ["/paperclip"]
 WORKDIR /home/paperclip/workspace
