@@ -89,6 +89,19 @@ write_metadata_file() {
 generate_bootstrap_invite_url() {
   local bootstrap_output
   local bootstrap_status
+  # bootstrap-ceo reads config.server.deploymentMode from the JSON config file, not from env vars.
+  # When onboard runs with private exposure, it writes deploymentMode=local_trusted to the config
+  # (authenticated+private is treated as local_trusted internally), so bootstrap-ceo skips.
+  # The running server uses PAPERCLIP_DEPLOYMENT_MODE env at runtime and is unaffected by this patch.
+  docker exec "$CONTAINER_NAME" bash -lc '
+    node -e "
+      const fs=require(\"fs\");
+      const p=\"/paperclip/instances/default/config.json\";
+      const c=JSON.parse(fs.readFileSync(p,\"utf8\"));
+      if(c.server)c.server.deploymentMode=\"authenticated\";
+      fs.writeFileSync(p,JSON.stringify(c));
+    "
+  ' 2>/dev/null || true
   if bootstrap_output="$(
     docker exec \
       -e PAPERCLIP_DEPLOYMENT_MODE="$PAPERCLIP_DEPLOYMENT_MODE" \
