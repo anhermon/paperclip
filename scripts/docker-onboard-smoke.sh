@@ -118,6 +118,9 @@ generate_bootstrap_invite_url() {
   )"
 
   if [[ -z "$invite_url" ]]; then
+    if printf '%s\n' "$bootstrap_output" | grep -qi "only required for authenticated\|not required\|local_trusted"; then
+      return 0
+    fi
     echo "Smoke bootstrap failed: bootstrap-ceo did not print an invite URL" >&2
     printf '%s\n' "$bootstrap_output" >&2
     return 1
@@ -202,23 +205,26 @@ auto_bootstrap_authenticated_smoke() {
     echo "    Smoke bootstrap: instance already ready"
   else
     local invite_url
-    invite_url="$(generate_bootstrap_invite_url)"
-    echo "    Smoke bootstrap: generated bootstrap invite via auth bootstrap-ceo"
-
-    local invite_token="${invite_url##*/}"
-    local accept_response="$TMP_DIR/accept.json"
-    local accept_status
-    accept_status="$(post_json_with_cookies \
-      "$PAPERCLIP_PUBLIC_URL/api/invites/$invite_token/accept" \
-      '{"requestType":"human"}' \
-      "$accept_response")"
-    if [[ ! "$accept_status" =~ ^2 ]]; then
-      echo "Smoke bootstrap failed: bootstrap invite acceptance returned HTTP $accept_status" >&2
-      cat "$accept_response" >&2 || true
-      echo >&2
-      return 1
+    invite_url="$(generate_bootstrap_invite_url)" || return 1
+    if [[ -n "$invite_url" ]]; then
+      echo "    Smoke bootstrap: generated bootstrap invite via auth bootstrap-ceo"
+      local invite_token="${invite_url##*/}"
+      local accept_response="$TMP_DIR/accept.json"
+      local accept_status
+      accept_status="$(post_json_with_cookies \
+        "$PAPERCLIP_PUBLIC_URL/api/invites/$invite_token/accept" \
+        '{"requestType":"human"}' \
+        "$accept_response")"
+      if [[ ! "$accept_status" =~ ^2 ]]; then
+        echo "Smoke bootstrap failed: bootstrap invite acceptance returned HTTP $accept_status" >&2
+        cat "$accept_response" >&2 || true
+        echo >&2
+        return 1
+      fi
+      echo "    Smoke bootstrap: accepted bootstrap invite"
+    else
+      echo "    Smoke bootstrap: bootstrap not required in this deployment mode"
     fi
-    echo "    Smoke bootstrap: accepted bootstrap invite"
   fi
 
   local session_json
