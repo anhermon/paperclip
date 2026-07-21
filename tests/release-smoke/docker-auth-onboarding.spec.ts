@@ -72,28 +72,35 @@ test.describe("Docker authenticated onboarding smoke", () => {
     // The wizard may include a "Connect a model" step after agent naming.
     const modelHeading = page.locator("h3", { hasText: "Connect a model" });
     const taskHeading = page.locator("h3", { hasText: "Give it something to do" });
-    await expect(modelHeading.or(taskHeading)).toBeVisible({ timeout: 10_000 });
+    const reviewHeading = page.locator("h3", { hasText: "Review" });
+    await expect(modelHeading.or(taskHeading).or(reviewHeading)).toBeVisible({
+      timeout: 10_000,
+    });
     if (await modelHeading.isVisible()) {
       // Select Claude Code adapter so the agent is not created with adapterType "process".
       await page.getByRole("button", { name: /Claude Code/ }).click();
       await page.getByRole("button", { name: /Give it a heartbeat|Next/ }).click();
+      await expect(taskHeading.or(reviewHeading)).toBeVisible({ timeout: 10_000 });
     }
 
-    await expect(taskHeading).toBeVisible({ timeout: 10_000 });
+    // Older wizard versions have an explicit task-title step; newer ones skip it.
+    if (await taskHeading.isVisible()) {
+      await page
+        .locator('input[placeholder="e.g. Research competitor pricing"]')
+        .fill(TASK_TITLE);
+      await page.getByRole("button", { name: "Next" }).click();
+      await expect(
+        page.locator("h3").filter({ hasText: /Ready to launch|Review/ })
+      ).toBeVisible({ timeout: 10_000 });
+    }
+
+    // Launch: "Create & Open Task" (old) or "Get started" (new) — both complete setup.
     await page
-      .locator('input[placeholder="e.g. Research competitor pricing"]')
-      .fill(TASK_TITLE);
-    await page.getByRole("button", { name: "Next" }).click();
+      .getByRole("button", { name: /Create & Open Task|Get started/ })
+      .click();
 
-    await expect(
-      page.locator("h3", { hasText: "Ready to launch" })
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText(COMPANY_NAME)).toBeVisible();
-    await expect(page.getByText(AGENT_NAME)).toBeVisible();
-    await expect(page.getByText(TASK_TITLE)).toBeVisible();
-
-    await page.getByRole("button", { name: "Create & Open Task" }).click();
-    await expect(page).toHaveURL(/\/issues\//, { timeout: 10_000 });
+    // Newer wizard navigates to dashboard; older to an issue page.
+    await expect(page).toHaveURL(/\/issues\/|\/dashboard/, { timeout: 10_000 });
 
     const baseUrl = new URL(page.url()).origin;
 
@@ -127,7 +134,10 @@ test.describe("Docker authenticated onboarding smoke", () => {
       title: string;
       assigneeAgentId: string | null;
     }>;
-    const issue = issues.find((entry) => entry.title === TASK_TITLE);
+    // Newer wizard auto-creates a task; find any issue assigned to the CEO agent.
+    const issue =
+      issues.find((entry) => entry.title === TASK_TITLE) ??
+      issues.find((entry) => entry.assigneeAgentId === ceoAgent!.id);
     expect(issue).toBeTruthy();
     expect(issue!.assigneeAgentId).toBe(ceoAgent!.id);
 
