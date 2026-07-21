@@ -11,6 +11,7 @@ import {
   authVerifications,
 } from "@paperclipai/db";
 import type { Config } from "../config.js";
+import { resolvePaperclipInstanceId } from "../home-paths.js";
 
 export type BetterAuthSessionUser = {
   id: string;
@@ -24,6 +25,24 @@ export type BetterAuthSessionResult = {
 };
 
 type BetterAuthInstance = ReturnType<typeof betterAuth>;
+
+const AUTH_COOKIE_PREFIX_FALLBACK = "default";
+const AUTH_COOKIE_PREFIX_INVALID_SEGMENTS_RE = /[^a-zA-Z0-9_-]+/g;
+
+export function deriveAuthCookiePrefix(instanceId = resolvePaperclipInstanceId()): string {
+  const scopedInstanceId = instanceId
+    .trim()
+    .replace(AUTH_COOKIE_PREFIX_INVALID_SEGMENTS_RE, "-")
+    .replace(/^-+|-+$/g, "") || AUTH_COOKIE_PREFIX_FALLBACK;
+  return `paperclip-${scopedInstanceId}`;
+}
+
+export function buildBetterAuthAdvancedOptions(input: { disableSecureCookies: boolean }) {
+  return {
+    cookiePrefix: deriveAuthCookiePrefix(),
+    ...(input.disableSecureCookies ? { useSecureCookies: false } : {}),
+  };
+}
 
 function headersFromNodeHeaders(rawHeaders: IncomingHttpHeaders): Headers {
   const headers = new Headers();
@@ -43,7 +62,7 @@ function headersFromExpressRequest(req: Request): Headers {
 }
 
 /** Derives the list of trusted origins for BetterAuth from the deployment config and allowed hostnames. */
-export function deriveAuthTrustedOrigins(config: Config): string[] {
+export function deriveAuthTrustedOrigins(config: Config, opts?: { listenPort?: number }): string[] {
   const baseUrl = config.authBaseUrlMode === "explicit" ? config.authPublicBaseUrl : undefined;
   const trustedOrigins = new Set<string>();
 
@@ -55,11 +74,17 @@ export function deriveAuthTrustedOrigins(config: Config): string[] {
     }
   }
   if (config.deploymentMode === "authenticated") {
+    const port = opts?.listenPort ?? config.port;
+    const needsPortVariants = port !== 80 && port !== 443;
     for (const hostname of config.allowedHostnames) {
       const trimmed = hostname.trim().toLowerCase();
       if (!trimmed) continue;
       trustedOrigins.add(`https://${trimmed}`);
       trustedOrigins.add(`http://${trimmed}`);
+      if (needsPortVariants) {
+        trustedOrigins.add(`https://${trimmed}:${port}`);
+        trustedOrigins.add(`http://${trimmed}:${port}`);
+      }
     }
   }
 
@@ -82,6 +107,7 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins?
   const effectiveSecret = secret ?? AUTH_DEV_SECRET;
   const effectiveTrustedOrigins = trustedOrigins ?? deriveAuthTrustedOrigins(config);
 
+
   const publicUrl = process.env.PAPERCLIP_PUBLIC_URL ?? baseUrl;
   const isHttpOnly = publicUrl ? publicUrl.startsWith("http://") : false;
 
@@ -103,7 +129,7 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins?
       requireEmailVerification: false,
       disableSignUp: config.authDisableSignUp,
     },
-    ...(isHttpOnly ? { advanced: { useSecureCookies: false } } : {}),
+    advanced: buildBetterAuthAdvancedOptions({ disableSecureCookies: isHttpOnly }),
   };
 
   if (!baseUrl) {
