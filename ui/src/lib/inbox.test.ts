@@ -156,6 +156,15 @@ function makeRun(id: string, status: HeartbeatRun["status"], createdAt: string, 
     stdoutExcerpt: null,
     stderrExcerpt: null,
     contextSnapshot: null,
+    lastOutputAt: null,
+    lastOutputSeq: 0,
+    lastOutputStream: null,
+    lastOutputBytes: null,
+    livenessState: null,
+    livenessReason: null,
+    continuationAttempt: 0,
+    lastUsefulActionAt: null,
+    nextAction: null,
     startedAt: new Date(createdAt),
     finishedAt: null,
     createdAt: new Date(createdAt),
@@ -289,6 +298,7 @@ const dashboard: DashboardSummary = {
     pausedAgents: 0,
     pausedProjects: 0,
   },
+  runActivity: [],
 };
 
 describe("inbox helpers", () => {
@@ -546,7 +556,9 @@ describe("inbox helpers", () => {
     expect(
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set()).map((entry) => entry.type === "top"
         ? entry.itemKey
-        : entry.issueId),
+        : entry.type === "child"
+          ? entry.issueId
+          : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
       childIssue.id,
@@ -555,7 +567,9 @@ describe("inbox helpers", () => {
     expect(
       buildInboxKeyboardNavEntries(groupedSections, new Set(), new Set([parentIssue.id])).map((entry) => entry.type === "top"
         ? entry.itemKey
-        : entry.issueId),
+        : entry.type === "child"
+          ? entry.issueId
+          : entry.groupKey),
     ).toEqual([
       `workspace:default:${getInboxWorkItemKey({ kind: "issue", timestamp: 2, issue: parentIssue })}`,
     ]);

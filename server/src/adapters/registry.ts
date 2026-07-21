@@ -1,5 +1,14 @@
-import type { ServerAdapterModule } from "./types.js";
+import type { AdapterModelProfileDefinition, ServerAdapterModule } from "./types.js";
 import { getAdapterSessionManagement } from "@paperclipai/adapter-utils";
+import {
+  execute as acpxExecute,
+  testEnvironment as acpxTestEnvironment,
+  sessionCodec as acpxSessionCodec,
+  getConfigSchema as getAcpxConfigSchema,
+  listAcpxSkills,
+  syncAcpxSkills,
+} from "@paperclipai/adapter-acpx-local/server";
+import { agentConfigurationDoc as acpxAgentConfigurationDoc } from "@paperclipai/adapter-acpx-local";
 import {
   execute as claudeExecute,
   listClaudeSkills,
@@ -9,7 +18,11 @@ import {
   sessionCodec as claudeSessionCodec,
   getQuotaWindows as claudeGetQuotaWindows,
 } from "@paperclipai/adapter-claude-local/server";
-import { agentConfigurationDoc as claudeAgentConfigurationDoc, models as claudeModels } from "@paperclipai/adapter-claude-local";
+import {
+  agentConfigurationDoc as claudeAgentConfigurationDoc,
+  models as claudeModels,
+  modelProfiles as claudeModelProfiles,
+} from "@paperclipai/adapter-claude-local";
 import {
   execute as codexExecute,
   listCodexSkills,
@@ -18,7 +31,11 @@ import {
   sessionCodec as codexSessionCodec,
   getQuotaWindows as codexGetQuotaWindows,
 } from "@paperclipai/adapter-codex-local/server";
-import { agentConfigurationDoc as codexAgentConfigurationDoc, models as codexModels } from "@paperclipai/adapter-codex-local";
+import {
+  agentConfigurationDoc as codexAgentConfigurationDoc,
+  models as codexModels,
+  modelProfiles as codexModelProfiles,
+} from "@paperclipai/adapter-codex-local";
 import {
   execute as cursorExecute,
   listCursorSkills,
@@ -26,7 +43,11 @@ import {
   testEnvironment as cursorTestEnvironment,
   sessionCodec as cursorSessionCodec,
 } from "@paperclipai/adapter-cursor-local/server";
-import { agentConfigurationDoc as cursorAgentConfigurationDoc, models as cursorModels } from "@paperclipai/adapter-cursor-local";
+import {
+  agentConfigurationDoc as cursorAgentConfigurationDoc,
+  models as cursorModels,
+  modelProfiles as cursorModelProfiles,
+} from "@paperclipai/adapter-cursor-local";
 import {
   execute as geminiExecute,
   listGeminiSkills,
@@ -34,7 +55,11 @@ import {
   testEnvironment as geminiTestEnvironment,
   sessionCodec as geminiSessionCodec,
 } from "@paperclipai/adapter-gemini-local/server";
-import { agentConfigurationDoc as geminiAgentConfigurationDoc, models as geminiModels } from "@paperclipai/adapter-gemini-local";
+import {
+  agentConfigurationDoc as geminiAgentConfigurationDoc,
+  models as geminiModels,
+  modelProfiles as geminiModelProfiles,
+} from "@paperclipai/adapter-gemini-local";
 import {
   execute as openCodeExecute,
   listOpenCodeSkills,
@@ -46,6 +71,7 @@ import {
 import {
   agentConfigurationDoc as openCodeAgentConfigurationDoc,
   models as openCodeModels,
+  modelProfiles as openCodeModelProfiles,
 } from "@paperclipai/adapter-opencode-local";
 import {
   execute as openclawGatewayExecute,
@@ -55,7 +81,7 @@ import {
   agentConfigurationDoc as openclawGatewayAgentConfigurationDoc,
   models as openclawGatewayModels,
 } from "@paperclipai/adapter-openclaw-gateway";
-import { listCodexModels } from "./codex-models.js";
+import { listCodexModels, refreshCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
   execute as piExecute,
@@ -67,6 +93,7 @@ import {
 } from "@paperclipai/adapter-pi-local/server";
 import {
   agentConfigurationDoc as piAgentConfigurationDoc,
+  modelProfiles as piModelProfiles,
 } from "@paperclipai/adapter-pi-local";
 import {
   execute as hermesExecute,
@@ -86,6 +113,37 @@ import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
 
+function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(ctx: T): T {
+  const config =
+    ctx && typeof ctx === "object" && "config" in ctx && ctx.config && typeof ctx.config === "object"
+      ? (ctx.config as Record<string, unknown>)
+      : null;
+  const agent =
+    ctx && typeof ctx === "object" && "agent" in ctx && ctx.agent && typeof ctx.agent === "object"
+      ? (ctx.agent as Record<string, unknown>)
+      : null;
+  const agentAdapterConfig =
+    agent?.adapterConfig && typeof agent.adapterConfig === "object"
+      ? (agent.adapterConfig as Record<string, unknown>)
+      : null;
+
+  const configCommand =
+    typeof config?.command === "string" && config.command.length > 0 ? config.command : undefined;
+  const agentCommand =
+    typeof agentAdapterConfig?.command === "string" && agentAdapterConfig.command.length > 0
+      ? agentAdapterConfig.command
+      : undefined;
+
+  if (config && !config.hermesCommand && configCommand) {
+    config.hermesCommand = configCommand;
+  }
+  if (agentAdapterConfig && !agentAdapterConfig.hermesCommand && agentCommand) {
+    agentAdapterConfig.hermesCommand = agentCommand;
+  }
+
+  return ctx;
+}
+
 const claudeLocalAdapter: ServerAdapterModule = {
   type: "claude_local",
   execute: claudeExecute,
@@ -95,6 +153,7 @@ const claudeLocalAdapter: ServerAdapterModule = {
   sessionCodec: claudeSessionCodec,
   sessionManagement: getAdapterSessionManagement("claude_local") ?? undefined,
   models: claudeModels,
+  modelProfiles: claudeModelProfiles,
   listModels: listClaudeModels,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: true,
@@ -102,6 +161,22 @@ const claudeLocalAdapter: ServerAdapterModule = {
   requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: claudeAgentConfigurationDoc,
   getQuotaWindows: claudeGetQuotaWindows,
+};
+
+const acpxLocalAdapter: ServerAdapterModule = {
+  type: "acpx_local",
+  execute: acpxExecute,
+  testEnvironment: acpxTestEnvironment,
+  listSkills: listAcpxSkills,
+  syncSkills: syncAcpxSkills,
+  sessionCodec: acpxSessionCodec,
+  sessionManagement: getAdapterSessionManagement("acpx_local") ?? undefined,
+  supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: acpxAgentConfigurationDoc,
+  getConfigSchema: getAcpxConfigSchema,
 };
 
 const codexLocalAdapter: ServerAdapterModule = {
@@ -113,7 +188,9 @@ const codexLocalAdapter: ServerAdapterModule = {
   sessionCodec: codexSessionCodec,
   sessionManagement: getAdapterSessionManagement("codex_local") ?? undefined,
   models: codexModels,
+  modelProfiles: codexModelProfiles,
   listModels: listCodexModels,
+  refreshModels: refreshCodexModels,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: true,
   instructionsPathKey: "instructionsFilePath",
@@ -131,6 +208,7 @@ const cursorLocalAdapter: ServerAdapterModule = {
   sessionCodec: cursorSessionCodec,
   sessionManagement: getAdapterSessionManagement("cursor") ?? undefined,
   models: cursorModels,
+  modelProfiles: cursorModelProfiles,
   listModels: listCursorModels,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: true,
@@ -148,6 +226,7 @@ const geminiLocalAdapter: ServerAdapterModule = {
   sessionCodec: geminiSessionCodec,
   sessionManagement: getAdapterSessionManagement("gemini_local") ?? undefined,
   models: geminiModels,
+  modelProfiles: geminiModelProfiles,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: true,
   instructionsPathKey: "instructionsFilePath",
@@ -174,6 +253,7 @@ const openCodeLocalAdapter: ServerAdapterModule = {
   syncSkills: syncOpenCodeSkills,
   sessionCodec: openCodeSessionCodec,
   models: openCodeModels,
+  modelProfiles: openCodeModelProfiles,
   sessionManagement: getAdapterSessionManagement("opencode_local") ?? undefined,
   listModels: listOpenCodeModels,
   supportsLocalAgentJwt: true,
@@ -192,6 +272,7 @@ const piLocalAdapter: ServerAdapterModule = {
   sessionCodec: piSessionCodec,
   sessionManagement: getAdapterSessionManagement("pi_local") ?? undefined,
   models: [],
+  modelProfiles: piModelProfiles,
   listModels: listPiModels,
   supportsLocalAgentJwt: true,
   supportsInstructionsBundle: true,
@@ -200,17 +281,67 @@ const piLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: piAgentConfigurationDoc,
 };
 
+// hermes-paperclip-adapter v0.2.0 predates the authToken field; cast is
+// intentional until hermes ships a matching AdapterExecutionContext type.
+const executeHermesLocal = hermesExecute as unknown as ServerAdapterModule["execute"];
+
 const hermesLocalAdapter: ServerAdapterModule = {
   type: "hermes_local",
-  execute: hermesExecute,
-  testEnvironment: hermesTestEnvironment,
+  execute: async (ctx) => {
+    const normalizedCtx = normalizeHermesConfig(ctx);
+    if (!normalizedCtx.authToken) return executeHermesLocal(normalizedCtx);
+
+    const existingConfig = (normalizedCtx.agent.adapterConfig ?? {}) as Record<string, unknown>;
+    const existingEnv =
+      typeof existingConfig.env === "object" && existingConfig.env !== null && !Array.isArray(existingConfig.env)
+        ? (existingConfig.env as Record<string, string>)
+        : {};
+    const explicitApiKey =
+      typeof existingEnv.PAPERCLIP_API_KEY === "string" && existingEnv.PAPERCLIP_API_KEY.trim().length > 0;
+    const promptTemplate =
+      typeof existingConfig.promptTemplate === "string" && existingConfig.promptTemplate.trim().length > 0
+        ? existingConfig.promptTemplate
+        : "";
+    const authGuardPrompt = [
+      "Paperclip API safety rule:",
+      "Use Authorization: Bearer $PAPERCLIP_API_KEY on every Paperclip API request.",
+      "Use X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID on every Paperclip API request that writes or mutates data, including comments and issue updates.",
+      "Never use a board, browser, or local-board session for Paperclip API writes.",
+    ].join("\n");
+
+    const patchedConfig: Record<string, unknown> = {
+      ...existingConfig,
+      env: {
+        ...existingEnv,
+        ...(!explicitApiKey ? { PAPERCLIP_API_KEY: normalizedCtx.authToken } : {}),
+        PAPERCLIP_RUN_ID: normalizedCtx.runId,
+      },
+    };
+
+    // Only inject the auth guard into promptTemplate when a custom template already exists.
+    // When no custom template is set, Hermes uses its built-in default heartbeat/task prompt —
+    // overwriting it with only the auth guard text would strip the assigned issue/workflow instructions.
+    if (promptTemplate) {
+      patchedConfig.promptTemplate = `${authGuardPrompt}\n\n${promptTemplate}`;
+    }
+
+    const patchedCtx = {
+      ...normalizedCtx,
+      agent: {
+        ...normalizedCtx.agent,
+        adapterConfig: patchedConfig,
+      },
+    };
+
+    return executeHermesLocal(patchedCtx);
+  },
+  testEnvironment: (ctx) => hermesTestEnvironment(normalizeHermesConfig(ctx) as never),
   sessionCodec: hermesSessionCodec,
   listSkills: hermesListSkills,
   syncSkills: hermesSyncSkills,
   models: hermesModels,
   supportsLocalAgentJwt: true,
-  supportsInstructionsBundle: true,
-  instructionsPathKey: "instructionsFilePath",
+  supportsInstructionsBundle: false,
   requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: hermesAgentConfigurationDoc,
   detectModel: () => detectModelFromHermes(),
@@ -229,6 +360,7 @@ const pausedOverrides = new Set<string>();
 
 function registerBuiltInAdapters() {
   for (const adapter of [
+    acpxLocalAdapter,
     claudeLocalAdapter,
     codexLocalAdapter,
     openCodeLocalAdapter,
@@ -250,12 +382,43 @@ registerBuiltInAdapters();
 // Load external adapter plugins (e.g. droid_local)
 //
 // External adapter packages export createServerAdapter() which returns a
-// ServerAdapterModule. The host fills in sessionManagement.
+// ServerAdapterModule. When the module provides its own sessionManagement
+// it is preserved; otherwise the host falls back to the built-in registry
+// lookup (so externals that override a built-in type inherit the builtin's
+// policy). This brings init-time registration to at-least-as-good behavior
+// as the hot-install path (routes/adapters.ts:179 -> registerServerAdapter):
+// both preserve module-provided sessionManagement, and init-time additionally
+// applies the registry fallback for externals overriding a built-in type.
 // ---------------------------------------------------------------------------
 
 /** Cached sync wrapper — the store is a simple JSON file read, safe to call frequently. */
 function getDisabledAdapterTypesFromStore(): string[] {
   return getDisabledAdapterTypes();
+}
+
+/**
+ * Merge an external adapter module with host-provided session management.
+ *
+ * Module-provided `sessionManagement` takes precedence. When absent, fall
+ * back to the hardcoded registry keyed by adapter type (so externals that
+ * override a built-in — same `type` — inherit the builtin's policy). If
+ * neither is available, `sessionManagement` remains `undefined`.
+ *
+ * Used by both the init-time IIFE below (external-adapter load pass on
+ * server start) and the hot-install path in `routes/adapters.ts`
+ * (`registerWithSessionManagement`), so the two load paths resolve
+ * `sessionManagement` identically.
+ */
+export function resolveExternalAdapterRegistration(
+  externalAdapter: ServerAdapterModule,
+): ServerAdapterModule {
+  return {
+    ...externalAdapter,
+    sessionManagement:
+      externalAdapter.sessionManagement
+        ?? getAdapterSessionManagement(externalAdapter.type)
+        ?? undefined,
+  };
 }
 
 /**
@@ -281,10 +444,7 @@ const externalAdaptersReady: Promise<void> = (async () => {
       }
       adaptersByType.set(
         externalAdapter.type,
-        {
-          ...externalAdapter,
-          sessionManagement: getAdapterSessionManagement(externalAdapter.type) ?? undefined,
-        },
+        resolveExternalAdapterRegistration(externalAdapter),
       );
     }
   } catch (err) {
@@ -302,7 +462,6 @@ export function waitForExternalAdapters(): Promise<void> {
   return externalAdaptersReady;
 }
 
-/** Registers or replaces a server adapter module, saving the builtin fallback if a builtin type is being overridden. */
 export function registerServerAdapter(adapter: ServerAdapterModule): void {
   if (BUILTIN_ADAPTER_TYPES.has(adapter.type) && !builtinFallbacks.has(adapter.type)) {
     const existing = adaptersByType.get(adapter.type);
@@ -313,7 +472,6 @@ export function registerServerAdapter(adapter: ServerAdapterModule): void {
   adaptersByType.set(adapter.type, adapter);
 }
 
-/** Removes a non-builtin adapter or restores a builtin's fallback when an override is unregistered. */
 export function unregisterServerAdapter(type: string): void {
   if (type === processAdapter.type || type === httpAdapter.type) return;
   if (builtinFallbacks.has(type)) {
@@ -330,7 +488,6 @@ export function unregisterServerAdapter(type: string): void {
   adaptersByType.delete(type);
 }
 
-/** Returns the active adapter for the given type, throwing if it is not registered. */
 export function requireServerAdapter(type: string): ServerAdapterModule {
   const adapter = findActiveServerAdapter(type);
   if (!adapter) {
@@ -339,12 +496,10 @@ export function requireServerAdapter(type: string): ServerAdapterModule {
   return adapter;
 }
 
-/** Returns the active adapter for the given type, falling back to the process adapter if not found. */
 export function getServerAdapter(type: string): ServerAdapterModule {
   return findActiveServerAdapter(type) ?? processAdapter;
 }
 
-/** Returns the list of models for an adapter, preferring dynamically discovered models over the static list. */
 export async function listAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
   const adapter = findActiveServerAdapter(type);
   if (!adapter) return [];
@@ -355,7 +510,30 @@ export async function listAdapterModels(type: string): Promise<{ id: string; lab
   return adapter.models ?? [];
 }
 
-/** Returns all registered server adapter modules, including overrides. */
+export async function refreshAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
+  const adapter = findActiveServerAdapter(type);
+  if (!adapter) return [];
+  if (adapter.refreshModels) {
+    const refreshed = await adapter.refreshModels();
+    if (refreshed.length > 0) return refreshed;
+  }
+  if (adapter.listModels) {
+    const discovered = await adapter.listModels();
+    if (discovered.length > 0) return discovered;
+  }
+  return adapter.models ?? [];
+}
+
+export async function listAdapterModelProfiles(type: string): Promise<AdapterModelProfileDefinition[]> {
+  const adapter = findActiveServerAdapter(type);
+  if (!adapter) return [];
+  if (adapter.listModelProfiles) {
+    const discovered = await adapter.listModelProfiles();
+    if (discovered.length > 0) return discovered;
+  }
+  return adapter.modelProfiles ?? [];
+}
+
 export function listServerAdapters(): ServerAdapterModule[] {
   return Array.from(adaptersByType.values());
 }
@@ -373,7 +551,6 @@ export function listEnabledServerAdapters(): ServerAdapterModule[] {
     : Array.from(adaptersByType.values());
 }
 
-/** Runs the adapter's model-detection logic and returns the detected model info, or null if unsupported. */
 export async function detectAdapterModel(
   type: string,
 ): Promise<{ model: string; provider: string; source: string; candidates?: string[] } | null> {
@@ -432,12 +609,10 @@ export function getPausedOverrides(): Set<string> {
   return pausedOverrides;
 }
 
-/** Looks up an adapter by type in the registry without considering pause state, returning null if absent. */
 export function findServerAdapter(type: string): ServerAdapterModule | null {
   return adaptersByType.get(type) ?? null;
 }
 
-/** Looks up the currently active adapter for a type, returning the builtin fallback when the override is paused. */
 export function findActiveServerAdapter(type: string): ServerAdapterModule | null {
   if (pausedOverrides.has(type)) {
     const fallback = builtinFallbacks.get(type);

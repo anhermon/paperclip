@@ -100,23 +100,23 @@ describe("toggleIssueFilterValue", () => {
 
 describe("resolveIssueFilterWorkspaceId", () => {
   it("returns executionWorkspaceId when present", () => {
-    const issue = { executionWorkspaceId: "exec-1", projectWorkspaceId: "proj-1" };
+    const issue = { executionWorkspaceId: "exec-1", projectWorkspaceId: "proj-1", projectId: null };
     expect(resolveIssueFilterWorkspaceId(issue)).toBe("exec-1");
   });
 
   it("falls back to projectWorkspaceId when executionWorkspaceId is null", () => {
-    const issue = { executionWorkspaceId: null, projectWorkspaceId: "proj-2" };
+    const issue = { executionWorkspaceId: null, projectWorkspaceId: "proj-2", projectId: null };
     expect(resolveIssueFilterWorkspaceId(issue)).toBe("proj-2");
   });
 
   it("returns null when both are null", () => {
-    const issue = { executionWorkspaceId: null, projectWorkspaceId: null };
+    const issue = { executionWorkspaceId: null, projectWorkspaceId: null, projectId: null };
     expect(resolveIssueFilterWorkspaceId(issue)).toBeNull();
   });
 
   it("returns null when both are null (fallback to null)", () => {
     // undefined resolves to null via the nullish coalescing chain
-    const issue = { executionWorkspaceId: null as null, projectWorkspaceId: null as null };
+    const issue = { executionWorkspaceId: null as null, projectWorkspaceId: null as null, projectId: null };
     expect(resolveIssueFilterWorkspaceId(issue)).toBeNull();
   });
 });
