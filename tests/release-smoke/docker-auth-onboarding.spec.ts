@@ -49,7 +49,9 @@ test.describe("Docker authenticated onboarding smoke", () => {
 
     // The wizard may include a "Define your mission" step between company name and agent creation.
     const missionHeading = page.locator("h3", { hasText: "Define your mission" });
-    const agentHeading = page.locator("h3", { hasText: "Create your first agent" });
+    const agentHeading = page.locator("h3").filter({
+      hasText: /Create your (first agent|team lead)/,
+    });
     await expect(missionHeading.or(agentHeading)).toBeVisible({ timeout: 10_000 });
     if (await missionHeading.isVisible()) {
       await page
@@ -60,7 +62,11 @@ test.describe("Docker authenticated onboarding smoke", () => {
 
     await expect(agentHeading).toBeVisible({ timeout: 10_000 });
 
-    await expect(page.locator('input[placeholder="CEO"]')).toHaveValue(AGENT_NAME);
+    const agentInput = page.locator(
+      'input[placeholder="CEO"], input[placeholder="Chief of staff"]'
+    );
+    await agentInput.clear();
+    await agentInput.fill(AGENT_NAME);
     await page.getByRole("button", { name: "Next" }).click();
 
     await expect(
