@@ -17,7 +17,6 @@ const mockAgentInstructionsService = vi.hoisted(() => ({
   exportFiles: vi.fn(),
   ensureManagedBundle: vi.fn(),
   materializeManagedBundle: vi.fn(),
-  recoverExistingManagedBundleConfig: vi.fn(async () => null),
 }));
 
 const mockAccessService = vi.hoisted(() => ({
@@ -29,19 +28,22 @@ const mockSecretService = vi.hoisted(() => ({
   resolveAdapterConfigForRuntime: vi.fn(),
   normalizeAdapterConfigForPersistence: vi.fn(async (_companyId: string, config: Record<string, unknown>) => config),
 }));
+const mockEnvironmentService = vi.hoisted(() => ({
+  getById: vi.fn(),
+}));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 const mockSyncInstructionsBundleConfigFromFilePath = vi.hoisted(() => vi.fn());
 const mockFindServerAdapter = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
-  agentPoliciesService: vi.fn(() => ({})),
   agentService: () => mockAgentService,
   agentInstructionsService: () => mockAgentInstructionsService,
   accessService: () => mockAccessService,
   approvalService: () => ({}),
   companySkillService: () => ({ listRuntimeSkillEntries: vi.fn() }),
   budgetService: () => ({}),
+  environmentService: () => mockEnvironmentService,
   heartbeatService: () => ({}),
   issueApprovalService: () => ({}),
   issueService: () => ({}),
@@ -58,7 +60,6 @@ vi.mock("../adapters/index.js", () => ({
 
 function registerModuleMocks() {
   vi.doMock("../services/index.js", () => ({
-    agentPoliciesService: vi.fn(() => ({})),
     agentService: () => mockAgentService,
     agentInstructionsService: () => mockAgentInstructionsService,
     accessService: () => mockAccessService,
@@ -115,6 +116,7 @@ function makeAgent() {
     adapterType: "codex_local",
     adapterConfig: {},
     runtimeConfig: {},
+    defaultEnvironmentId: null,
     permissions: null,
     updatedAt: new Date(),
   };
