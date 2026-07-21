@@ -47,9 +47,18 @@ test.describe("Docker authenticated onboarding smoke", () => {
     await page.locator('input[placeholder="Acme Corp"]').fill(COMPANY_NAME);
     await page.getByRole("button", { name: "Next" }).click();
 
-    await expect(
-      page.locator("h3", { hasText: "Create your first agent" })
-    ).toBeVisible({ timeout: 10_000 });
+    // The wizard may include a "Define your mission" step between company name and agent creation.
+    const missionHeading = page.locator("h3", { hasText: "Define your mission" });
+    const agentHeading = page.locator("h3", { hasText: "Create your first agent" });
+    await expect(missionHeading.or(agentHeading)).toBeVisible({ timeout: 10_000 });
+    if (await missionHeading.isVisible()) {
+      await page
+        .getByPlaceholder("What is your team trying to achieve?")
+        .fill("Release smoke mission");
+      await page.getByRole("button", { name: "Confirm mission" }).click();
+    }
+
+    await expect(agentHeading).toBeVisible({ timeout: 10_000 });
 
     await expect(page.locator('input[placeholder="CEO"]')).toHaveValue(AGENT_NAME);
     await page.getByRole("button", { name: "Next" }).click();
@@ -69,7 +78,7 @@ test.describe("Docker authenticated onboarding smoke", () => {
     await expect(page.getByText(AGENT_NAME)).toBeVisible();
     await expect(page.getByText(TASK_TITLE)).toBeVisible();
 
-    await page.getByRole("button", { name: "Create & Open Issue" }).click();
+    await page.getByRole("button", { name: "Create & Open Task" }).click();
     await expect(page).toHaveURL(/\/issues\//, { timeout: 10_000 });
 
     const baseUrl = new URL(page.url()).origin;
