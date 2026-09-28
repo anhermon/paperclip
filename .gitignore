@@ -1,5 +1,13 @@
+node_modules
 node_modules/
+**/node_modules
+**/node_modules/
 dist/
+dist-preview/
+dist-flow-preview/
+server/ui-dist/
+packages/paperclip-runner/runner/target/
+ui/storybook-static/
 .env
 *.tsbuildinfo
 drizzle/meta/
@@ -8,6 +16,9 @@ coverage/
 benchmarks/*.json
 benchmarks/results/
 .DS_Store
+._*
+.AppleDouble
+.LSOverride
 data/
 .paperclip/
 .pnpm-store/
@@ -16,6 +27,8 @@ cli/tmp/
 
 # Scratch/seed scripts (but not scripts/ dir)
 check-*.mjs
+!.github/scripts/check-*.mjs
+!.github/scripts/tests/check-*.mjs
 !scripts/check-*.mjs
 new-agent*.json
 newcompany.json
@@ -34,12 +47,14 @@ server/src/**/*.d.ts
 server/src/**/*.d.ts.map
 tmp/
 feedback-export-*
+diagnostics/
 
 # Editor / tool temp files
 *.tmp
 .vscode/
 .claude/settings.local.json
 .paperclip-local/
+.paperclip-runtime/
 /.idea/
 /.agents/
 
@@ -49,8 +64,23 @@ feedback-export-*
 # Playwright
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+tests/runner-e2e/results/
+.env.runner-e2e.local
 tests/release-smoke/test-results/
 tests/release-smoke/playwright-report/
+test-results/issue-detail-perf/
+tests/storybook-visual/.cache/
+tests/storybook-visual/.snapshots/
+tests/storybook-visual/baseline-review/
+tests/storybook-visual/test-results/
+tests/storybook-visual/playwright-report/
 .superset/
+.superpowers/
 .claude/worktrees/
-cowork-inbox/
+.herenow
+.vercel/
+.env.local
+test-results/
+
+# Retained local lifecycle behavior measurements
+.lifecycle-baseline/

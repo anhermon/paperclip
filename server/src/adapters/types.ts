@@ -10,6 +10,8 @@ export type {
   SkillInvocationReport,
   AdapterInvocationMeta,
   AdapterExecutionContext,
+  AdapterRuntimeToolAccess,
+  AdapterRuntimeToolDelivery,
   AdapterEnvironmentCheckLevel,
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestStatus,
@@ -29,5 +31,6 @@ export type {
   ConfigFieldOption,
   ConfigFieldSchema,
   AdapterConfigSchema,
+  AdapterRuntimeCommandSpec,
   ServerAdapterModule,
 } from "@paperclipai/adapter-utils";

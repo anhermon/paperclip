@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Issue } from "@paperclipai/shared";
 import {
+  applyLocalQueuedIssueCommentState,
   applyOptimisticIssueFieldUpdate,
   applyOptimisticIssueFieldUpdateToCollection,
   applyOptimisticIssueCommentUpdate,
@@ -8,9 +9,11 @@ import {
   flattenIssueCommentPages,
   getNextIssueCommentPageParam,
   isQueuedIssueComment,
+  loadRemainingIssueCommentPages,
   matchesIssueRef,
   mergeIssueComments,
   removeIssueCommentFromPages,
+  shouldAutoloadOlderIssueComments,
   takeOptimisticIssueComment,
   upsertIssueComment,
   upsertIssueCommentInPages,
@@ -80,6 +83,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "Second",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:02.000Z"),
           updatedAt: new Date("2026-03-28T14:00:02.000Z"),
         },
@@ -94,6 +100,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "First",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:01.000Z"),
           updatedAt: new Date("2026-03-28T14:00:01.000Z"),
         },
@@ -101,6 +110,66 @@ describe("optimistic issue comments", () => {
     );
 
     expect(merged.map((comment) => comment.id)).toEqual(["optimistic-1", "comment-2"]);
+  });
+
+  it("reconciles an optimistic comment with its canonical server copy", () => {
+    const optimistic = createOptimisticIssueComment({
+      companyId: "company-1",
+      issueId: "issue-1",
+      body: "Do not flash twice",
+      authorUserId: "board-1",
+    });
+    const { clientId: _clientId, clientStatus: _clientStatus, queueTargetRunId: _queueTargetRunId, ...persisted } = optimistic;
+
+    const merged = mergeIssueComments(
+      [{ ...persisted, id: "comment-1" }],
+      [optimistic],
+    );
+
+    expect(merged.map((comment) => comment.id)).toEqual(["comment-1"]);
+    expect(merged[0]).toMatchObject({ clientId: optimistic.clientId });
+  });
+
+  it("reconciles repeated identical comments one-for-one", () => {
+    const first = createOptimisticIssueComment({
+      companyId: "company-1",
+      issueId: "issue-1",
+      body: "Same text",
+      authorUserId: "board-1",
+    });
+    const second = createOptimisticIssueComment({
+      companyId: "company-1",
+      issueId: "issue-1",
+      body: "Same text",
+      authorUserId: "board-1",
+    });
+    const { clientId: _clientId, clientStatus: _clientStatus, queueTargetRunId: _queueTargetRunId, ...persisted } = first;
+
+    const merged = mergeIssueComments(
+      [{ ...persisted, id: "comment-1" }],
+      [first, second],
+    );
+
+    expect(merged).toHaveLength(2);
+    expect(merged.map((comment) => comment.id)).toContain("comment-1");
+    expect(merged.map((comment) => comment.id)).toContain(second.id);
+  });
+
+  it("keeps repeated identical optimistic comments when neither is persisted", () => {
+    const first = createOptimisticIssueComment({
+      companyId: "company-1",
+      issueId: "issue-1",
+      body: "Same pending text",
+      authorUserId: "board-1",
+    });
+    const second = createOptimisticIssueComment({
+      companyId: "company-1",
+      issueId: "issue-1",
+      body: "Same pending text",
+      authorUserId: "board-1",
+    });
+
+    expect(mergeIssueComments([], [first, second])).toHaveLength(2);
   });
 
   it("can take one optimistic queued comment back out of the queue", () => {
@@ -137,6 +206,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "Original",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:00.000Z"),
           updatedAt: new Date("2026-03-28T14:00:00.000Z"),
         },
@@ -148,6 +220,9 @@ describe("optimistic issue comments", () => {
         authorAgentId: null,
         authorUserId: "board-1",
         body: "Updated",
+        authorType: "user",
+        presentation: null,
+        metadata: null,
         createdAt: new Date("2026-03-28T14:00:00.000Z"),
         updatedAt: new Date("2026-03-28T14:00:05.000Z"),
       },
@@ -167,6 +242,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "Newest",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:03.000Z"),
           updatedAt: new Date("2026-03-28T14:00:03.000Z"),
         },
@@ -179,6 +257,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "Oldest",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:01.000Z"),
           updatedAt: new Date("2026-03-28T14:00:01.000Z"),
         },
@@ -189,6 +270,9 @@ describe("optimistic issue comments", () => {
           authorAgentId: null,
           authorUserId: "board-1",
           body: "Middle",
+          authorType: "user",
+          presentation: null,
+          metadata: null,
           createdAt: new Date("2026-03-28T14:00:02.000Z"),
           updatedAt: new Date("2026-03-28T14:00:02.000Z"),
         },
@@ -213,6 +297,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Second",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:02.000Z"),
             updatedAt: new Date("2026-03-28T14:00:02.000Z"),
           },
@@ -223,6 +310,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "First",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:01.000Z"),
             updatedAt: new Date("2026-03-28T14:00:01.000Z"),
           },
@@ -230,6 +320,70 @@ describe("optimistic issue comments", () => {
         2,
       ),
     ).toBe("comment-1");
+  });
+
+  it("loads remaining comment pages until the terminal partial page", async () => {
+    const fetchPage = vi.fn(async (afterCommentId: string) => {
+      if (afterCommentId === "comment-3") return [{ id: "comment-2" }, { id: "comment-1" }];
+      if (afterCommentId === "comment-1") return [{ id: "comment-0" }];
+      return [];
+    });
+
+    const loaded = await loadRemainingIssueCommentPages({
+      pages: [[{ id: "comment-4" }, { id: "comment-3" }]],
+      pageParams: [null],
+      pageSize: 2,
+      fetchPage,
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(fetchPage).toHaveBeenNthCalledWith(1, "comment-3");
+    expect(fetchPage).toHaveBeenNthCalledWith(2, "comment-1");
+    expect(loaded.pages.map((page) => page.map((comment) => comment.id))).toEqual([
+      ["comment-4", "comment-3"],
+      ["comment-2", "comment-1"],
+      ["comment-0"],
+    ]);
+    expect(loaded.pageParams).toEqual([null, "comment-3", "comment-1"]);
+  });
+
+  it("autoloads older chat comments while the initial thread is still under the threshold", () => {
+    expect(
+      shouldAutoloadOlderIssueComments({
+        activeDetailTab: "chat",
+        hasOlderComments: true,
+        loadedCommentCount: 50,
+        initialPageLoading: false,
+        olderPageLoading: false,
+        autoLoadLimit: 150,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not autoload older comments outside the chat tab", () => {
+    expect(
+      shouldAutoloadOlderIssueComments({
+        activeDetailTab: "activity",
+        hasOlderComments: true,
+        loadedCommentCount: 50,
+        initialPageLoading: false,
+        olderPageLoading: false,
+        autoLoadLimit: 150,
+      }),
+    ).toBe(false);
+  });
+
+  it("stops autoloading once the initial comment window reaches the cap", () => {
+    expect(
+      shouldAutoloadOlderIssueComments({
+        activeDetailTab: "chat",
+        hasOlderComments: true,
+        loadedCommentCount: 150,
+        initialPageLoading: false,
+        olderPageLoading: false,
+        autoLoadLimit: 150,
+      }),
+    ).toBe(false);
   });
 
   it("upserts paged comments without dropping older pages", () => {
@@ -243,6 +397,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Newest",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:03.000Z"),
             updatedAt: new Date("2026-03-28T14:00:03.000Z"),
           },
@@ -255,6 +412,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Oldest",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:01.000Z"),
             updatedAt: new Date("2026-03-28T14:00:01.000Z"),
           },
@@ -267,6 +427,9 @@ describe("optimistic issue comments", () => {
         authorAgentId: null,
         authorUserId: "board-1",
         body: "Brand new",
+        authorType: "user",
+        presentation: null,
+        metadata: null,
         createdAt: new Date("2026-03-28T14:00:04.000Z"),
         updatedAt: new Date("2026-03-28T14:00:04.000Z"),
       },
@@ -287,6 +450,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Newest",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:03.000Z"),
             updatedAt: new Date("2026-03-28T14:00:03.000Z"),
           },
@@ -299,6 +465,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Middle",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:02.000Z"),
             updatedAt: new Date("2026-03-28T14:00:02.000Z"),
           },
@@ -309,6 +478,9 @@ describe("optimistic issue comments", () => {
             authorAgentId: null,
             authorUserId: "board-1",
             body: "Oldest",
+            authorType: "user",
+            presentation: null,
+            metadata: null,
             createdAt: new Date("2026-03-28T14:00:01.000Z"),
             updatedAt: new Date("2026-03-28T14:00:01.000Z"),
           },
@@ -334,9 +506,12 @@ describe("optimistic issue comments", () => {
         title: "Fix comment flow",
         description: null,
         status: "done",
+        workMode: "standard",
         priority: "medium",
+        reviewPolicy: null,
         assigneeAgentId: "agent-1",
         assigneeUserId: null,
+        responsibleUserId: null,
         checkoutRunId: null,
         executionRunId: null,
         executionAgentNameKey: null,
@@ -403,9 +578,12 @@ describe("optimistic issue comments", () => {
         title: "Fix property pane",
         description: null,
         status: "todo",
+        workMode: "standard",
         priority: "medium",
+        reviewPolicy: null,
         assigneeAgentId: "agent-1",
         assigneeUserId: null,
+        responsibleUserId: null,
         checkoutRunId: null,
         executionRunId: null,
         executionAgentNameKey: null,
@@ -480,6 +658,7 @@ describe("optimistic issue comments", () => {
           leadAgentId: null,
           targetDate: null,
           color: null,
+          icon: null,
           env: null,
           pauseReason: null,
           pausedAt: null,
@@ -511,6 +690,7 @@ describe("optimistic issue comments", () => {
           strategyType: "project_primary",
           branchName: null,
           status: "active",
+          deliveryState: "unknown",
           name: "Execution workspace",
           cwd: "/tmp/paperclip",
           repoUrl: null,
@@ -575,9 +755,12 @@ describe("optimistic issue comments", () => {
         title: "Fix property pane",
         description: null,
         status: "todo",
+        workMode: "standard",
         priority: "medium",
+        reviewPolicy: null,
         assigneeAgentId: "agent-1",
         assigneeUserId: null,
+        responsibleUserId: null,
         checkoutRunId: null,
         executionRunId: null,
         executionAgentNameKey: null,
@@ -616,9 +799,12 @@ describe("optimistic issue comments", () => {
         title: "Leave me alone",
         description: null,
         status: "todo",
+        workMode: "standard",
         priority: "medium",
+        reviewPolicy: null,
         assigneeAgentId: "agent-2",
         assigneeUserId: null,
+        responsibleUserId: null,
         checkoutRunId: null,
         executionRunId: null,
         executionAgentNameKey: null,
@@ -659,12 +845,59 @@ describe("optimistic issue comments", () => {
     expect(
       isQueuedIssueComment({
         comment: {
+          id: "comment-2",
           createdAt: new Date("2026-03-28T16:20:05.000Z"),
         },
         activeRunStartedAt: new Date("2026-03-28T16:20:00.000Z"),
+        activeRunWakeCommentId: "comment-1",
         runId: null,
       }),
     ).toBe(true);
+  });
+
+  it("does not mark the comment that triggered the active run as queued", () => {
+    expect(
+      isQueuedIssueComment({
+        comment: {
+          id: "comment-1",
+          createdAt: new Date("2026-03-28T16:20:05.000Z"),
+        },
+        activeRunStartedAt: new Date("2026-03-28T16:20:00.000Z"),
+        activeRunCommentId: "comment-1",
+        activeRunWakeCommentId: "comment-1",
+        runId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mark the active run context comment as queued", () => {
+    expect(
+      isQueuedIssueComment({
+        comment: {
+          id: "context-comment",
+          createdAt: new Date("2026-03-28T16:20:05.000Z"),
+        },
+        activeRunStartedAt: new Date("2026-03-28T16:20:00.000Z"),
+        activeRunCommentId: "context-comment",
+        activeRunWakeCommentId: "wake-comment",
+        runId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not mark the active run wake comment as queued", () => {
+    expect(
+      isQueuedIssueComment({
+        comment: {
+          id: "wake-comment",
+          createdAt: new Date("2026-03-28T16:20:05.000Z"),
+        },
+        activeRunStartedAt: new Date("2026-03-28T16:20:00.000Z"),
+        activeRunCommentId: "context-comment",
+        activeRunWakeCommentId: "wake-comment",
+        runId: null,
+      }),
+    ).toBe(false);
   });
 
   it("does not mark comments with an associated run as queued", () => {
@@ -703,5 +936,82 @@ describe("optimistic issue comments", () => {
         runId: null,
       }),
     ).toBe(false);
+  });
+
+  it("keeps a confirmed queued comment queued while the target run is still live", () => {
+    const comment = {
+      id: "comment-1",
+      companyId: "company-1",
+      issueId: "issue-1",
+      authorAgentId: null,
+      authorUserId: "board-1",
+      body: "Follow up after the active run",
+      authorType: "user" as const,
+      presentation: null,
+      metadata: null,
+      createdAt: new Date("2026-03-28T16:20:05.000Z"),
+      updatedAt: new Date("2026-03-28T16:20:05.000Z"),
+    };
+
+    const result = applyLocalQueuedIssueCommentState(comment, {
+      queuedTargetRunId: "run-1",
+      targetRunIsLive: true,
+      runningRunId: "run-1",
+    });
+
+    expect(result).toMatchObject({
+      id: "comment-1",
+      clientStatus: "queued",
+      queueState: "queued",
+      queueTargetRunId: "run-1",
+    });
+  });
+
+  it("does not keep local queued state after the target run is no longer live", () => {
+    const comment = {
+      id: "comment-1",
+      companyId: "company-1",
+      issueId: "issue-1",
+      authorAgentId: null,
+      authorUserId: "board-1",
+      body: "Follow up after the active run",
+      authorType: "user" as const,
+      presentation: null,
+      metadata: null,
+      createdAt: new Date("2026-03-28T16:20:05.000Z"),
+      updatedAt: new Date("2026-03-28T16:20:05.000Z"),
+    };
+
+    const result = applyLocalQueuedIssueCommentState(comment, {
+      queuedTargetRunId: "run-1",
+      targetRunIsLive: false,
+      runningRunId: null,
+    });
+
+    expect(result).toBe(comment);
+  });
+
+  it("does not keep local queued state when a different run is live", () => {
+    const comment = {
+      id: "comment-1",
+      companyId: "company-1",
+      issueId: "issue-1",
+      authorAgentId: null,
+      authorUserId: "board-1",
+      body: "Follow up after the active run",
+      authorType: "user" as const,
+      presentation: null,
+      metadata: null,
+      createdAt: new Date("2026-03-28T16:20:05.000Z"),
+      updatedAt: new Date("2026-03-28T16:20:05.000Z"),
+    };
+
+    const result = applyLocalQueuedIssueCommentState(comment, {
+      queuedTargetRunId: "run-1",
+      targetRunIsLive: true,
+      runningRunId: "run-2",
+    });
+
+    expect(result).toBe(comment);
   });
 });

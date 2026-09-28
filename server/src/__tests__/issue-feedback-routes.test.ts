@@ -49,6 +49,28 @@ const mockRoutineService = vi.hoisted(() => ({
   syncRunStatusForIssue: vi.fn(async () => undefined),
 }));
 const mockLogActivity = vi.hoisted(() => vi.fn(async () => undefined));
+const mockIssueThreadInteractionService = vi.hoisted(() => ({
+  expirePendingInteractionsForTerminalIssue: vi.fn(async () => []),
+  expireRequestConfirmationsSupersededByComment: vi.fn(async () => []),
+  expireStaleRequestConfirmationsForIssueDocument: vi.fn(async () => []),
+}));
+const mockEnvironmentService = vi.hoisted(() => ({
+  getById: vi.fn(async () => null),
+}));
+const mockExecutionWorkspaceService = vi.hoisted(() => ({}));
+const mockIssueReferenceService = vi.hoisted(() => ({
+  deleteDocumentSource: vi.fn(async () => undefined),
+  diffIssueReferenceSummary: vi.fn(() => ({
+    addedReferencedIssues: [],
+    removedReferencedIssues: [],
+    currentReferencedIssues: [],
+  })),
+  emptySummary: vi.fn(() => ({ outbound: [], inbound: [] })),
+  listIssueReferenceSummary: vi.fn(async () => ({ outbound: [], inbound: [] })),
+  syncComment: vi.fn(async () => undefined),
+  syncDocument: vi.fn(async () => undefined),
+  syncIssue: vi.fn(async () => undefined),
+}));
 
 function registerModuleMocks() {
   vi.doMock("@paperclipai/shared/telemetry", () => ({
@@ -61,22 +83,48 @@ function registerModuleMocks() {
   }));
 
   vi.doMock("../services/index.js", () => ({
-    agentPoliciesService: vi.fn(() => ({})),
+    companyService: () => ({
+      getById: vi.fn(async () => ({ id: "company-1" })),
+    }),
     accessService: () => mockAccessService,
     agentService: () => mockAgentService,
-    approvalService: () => ({}),
+    companySkillService: () => ({
+      completeTestRunForIssue: vi.fn(async () => null),
+    }),
+    documentAnnotationService: () => ({ remapOpenThreadsForDocument: async () => [] }),
     documentService: () => ({}),
-    executionWorkspaceService: () => ({}),
-    feedbackService: () => mockFeedbackService,
+    executionWorkspaceService: () => mockExecutionWorkspaceService,
     goalService: () => ({}),
     heartbeatService: () => mockHeartbeatService,
-    instanceSettingsService: () => mockInstanceSettingsService,
     issueApprovalService: () => ({}),
+    issueReferenceService: () => mockIssueReferenceService,
+    issueRecoveryActionService: () => ({
+      getActiveForIssue: vi.fn(async () => null),
+      listActiveForIssues: vi.fn(async () => new Map()),
+    }),
     issueService: () => mockIssueService,
+    issueThreadInteractionService: () => mockIssueThreadInteractionService,
     logActivity: mockLogActivity,
     projectService: () => ({}),
     routineService: () => mockRoutineService,
     workProductService: () => ({}),
+  }));
+
+  vi.doMock("../services/environments.js", () => ({
+    environmentService: () => mockEnvironmentService,
+  }));
+
+  vi.doMock("../services/execution-workspaces.js", () => ({
+    executionWorkspaceService: () => mockExecutionWorkspaceService,
+    STALE_REOPEN_PENDING_CONSUMPTION_GRACE_MS: 5 * 60 * 1000,
+  }));
+
+  vi.doMock("../services/feedback.js", () => ({
+    feedbackService: () => mockFeedbackService,
+  }));
+
+  vi.doMock("../services/instance-settings.js", () => ({
+    instanceSettingsService: () => mockInstanceSettingsService,
   }));
 }
 
@@ -92,6 +140,12 @@ async function createApp(actor: Record<string, unknown>) {
     next();
   });
   app.use("/api", issueRoutes({} as any, {} as any, { feedbackExportService: mockFeedbackExportService }));
+  const routeErrors: string[] = [];
+  app.locals.routeErrors = routeErrors;
+  app.use((error: unknown, _req: express.Request, _res: express.Response, next: express.NextFunction) => {
+    routeErrors.push(error instanceof Error ? error.stack ?? error.message : String(error));
+    next(error);
+  });
   app.use(errorHandler);
   return app;
 }
@@ -102,6 +156,10 @@ describe("issue feedback trace routes", () => {
     vi.doUnmock("@paperclipai/shared/telemetry");
     vi.doUnmock("../telemetry.js");
     vi.doUnmock("../services/index.js");
+    vi.doUnmock("../services/environments.js");
+    vi.doUnmock("../services/execution-workspaces.js");
+    vi.doUnmock("../services/feedback.js");
+    vi.doUnmock("../services/instance-settings.js");
     vi.doUnmock("../routes/issues.js");
     vi.doUnmock("../middleware/index.js");
     registerModuleMocks();
@@ -182,7 +240,6 @@ describe("issue feedback trace routes", () => {
     });
 
     const res = await request(app).get("/api/feedback-traces/trace-1");
-
     expect(res.status).toBe(403);
     expect(mockFeedbackService.getFeedbackTraceById).not.toHaveBeenCalled();
   });
@@ -202,7 +259,7 @@ describe("issue feedback trace routes", () => {
 
     const res = await request(app).get("/api/feedback-traces/trace-1");
 
-    expect(res.status).toBe(404);
+    expect(res.status, JSON.stringify({ body: res.body, errors: app.locals.routeErrors })).toBe(404);
   });
 
   it("returns 404 for bundle fetches when a board user lacks access to the trace company", async () => {
@@ -222,6 +279,6 @@ describe("issue feedback trace routes", () => {
 
     const res = await request(app).get("/api/feedback-traces/trace-1/bundle");
 
-    expect(res.status).toBe(404);
+    expect(res.status, JSON.stringify({ body: res.body, errors: app.locals.routeErrors })).toBe(404);
   });
 });

@@ -1,83 +1,116 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  defaultPermissionsForRole,
+  LOW_TRUST_REVIEW_PRESET,
+  agentPermissionsSchema,
+  updateAgentPermissionsSchema,
+} from "@paperclipai/shared";
+import {
+  defaultAgentPermissions,
   normalizeAgentPermissions,
+  permissionsImplyLowTrust,
 } from "../services/agent-permissions.js";
 
-// ---------------------------------------------------------------------------
-// defaultPermissionsForRole
-// ---------------------------------------------------------------------------
-
-describe("defaultPermissionsForRole", () => {
-  it("grants canCreateAgents=true for 'ceo' role", () => {
-    expect(defaultPermissionsForRole("ceo").canCreateAgents).toBe(true);
+describe("agent permissions service", () => {
+  it("grants agent-creation authority to new agents by default", () => {
+    expect(defaultAgentPermissions({ context: "create" }).canCreateAgents).toBe(true);
+    expect(normalizeAgentPermissions(undefined, { context: "create" }).canCreateAgents).toBe(true);
+    expect(normalizeAgentPermissions({}, { context: "create" }).canCreateAgents).toBe(true);
+    expect(
+      normalizeAgentPermissions({ trustPreset: "standard" }, { context: "create" }).canCreateAgents,
+    ).toBe(true);
   });
 
-  it("denies canCreateAgents for 'engineer' role", () => {
-    expect(defaultPermissionsForRole("engineer").canCreateAgents).toBe(false);
+  it("keeps stored rows without an explicit value fail-closed", () => {
+    expect(defaultAgentPermissions().canCreateAgents).toBe(false);
+    expect(defaultAgentPermissions({ context: "stored" }).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions(undefined).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions({}).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions("malformed").canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions([]).canCreateAgents).toBe(false);
   });
 
-  it("denies canCreateAgents for 'cto' role", () => {
-    expect(defaultPermissionsForRole("cto").canCreateAgents).toBe(false);
+  it("withholds agent-creation authority from new low-trust agents", () => {
+    expect(defaultAgentPermissions({ lowTrust: true, context: "create" }).canCreateAgents).toBe(false);
+    expect(
+      normalizeAgentPermissions(
+        { trustPreset: LOW_TRUST_REVIEW_PRESET },
+        { context: "create" },
+      ).canCreateAgents,
+    ).toBe(false);
+    expect(
+      normalizeAgentPermissions(
+        { authorizationPolicy: { trustPreset: LOW_TRUST_REVIEW_PRESET } },
+        { context: "create" },
+      ).canCreateAgents,
+    ).toBe(false);
+    expect(
+      normalizeAgentPermissions(
+        { authorizationPolicy: { trustBoundary: { mode: LOW_TRUST_REVIEW_PRESET } } },
+        { context: "create" },
+      ).canCreateAgents,
+    ).toBe(false);
   });
 
-  it("denies canCreateAgents for 'CEO' (case-sensitive check)", () => {
-    expect(defaultPermissionsForRole("CEO").canCreateAgents).toBe(false);
+  it("detects low-trust markers wherever the trust policy stores them", () => {
+    expect(permissionsImplyLowTrust(undefined)).toBe(false);
+    expect(permissionsImplyLowTrust({})).toBe(false);
+    expect(permissionsImplyLowTrust({ trustPreset: "standard" })).toBe(false);
+    expect(permissionsImplyLowTrust({ trustPreset: LOW_TRUST_REVIEW_PRESET })).toBe(true);
+    expect(permissionsImplyLowTrust({ reviewPreset: { id: LOW_TRUST_REVIEW_PRESET } })).toBe(true);
+    expect(
+      permissionsImplyLowTrust({ authorizationPolicy: { trustPreset: LOW_TRUST_REVIEW_PRESET } }),
+    ).toBe(true);
+    expect(
+      permissionsImplyLowTrust({
+        authorizationPolicy: { reviewPreset: { id: LOW_TRUST_REVIEW_PRESET } },
+      }),
+    ).toBe(true);
+    expect(
+      permissionsImplyLowTrust({
+        authorizationPolicy: { trustBoundary: { mode: LOW_TRUST_REVIEW_PRESET } },
+      }),
+    ).toBe(true);
   });
 
-  it("denies canCreateAgents for empty string", () => {
-    expect(defaultPermissionsForRole("").canCreateAgents).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// normalizeAgentPermissions
-// ---------------------------------------------------------------------------
-
-describe("normalizeAgentPermissions", () => {
-  it("returns defaults when permissions is null", () => {
-    const result = normalizeAgentPermissions(null, "ceo");
-    expect(result.canCreateAgents).toBe(true);
+  it("enables skill creation by default", () => {
+    expect(defaultAgentPermissions().canCreateSkills).toBe(true);
+    expect(defaultAgentPermissions({ lowTrust: true, context: "create" }).canCreateSkills).toBe(true);
   });
 
-  it("returns defaults when permissions is undefined", () => {
-    const result = normalizeAgentPermissions(undefined, "engineer");
-    expect(result.canCreateAgents).toBe(false);
+  it("preserves explicit canCreateAgents overrides in both contexts", () => {
+    expect(normalizeAgentPermissions({ canCreateAgents: false }, { context: "create" }).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions({ canCreateAgents: true }).canCreateAgents).toBe(true);
+    expect(
+      normalizeAgentPermissions({
+        canCreateAgents: true,
+        trustPreset: LOW_TRUST_REVIEW_PRESET,
+      }).canCreateAgents,
+    ).toBe(true);
   });
 
-  it("returns defaults when permissions is a string", () => {
-    const result = normalizeAgentPermissions("yes", "ceo");
-    expect(result.canCreateAgents).toBe(true);
+  it("defaults missing skill creation permission to true and preserves explicit false", () => {
+    expect(normalizeAgentPermissions({}).canCreateSkills).toBe(true);
+    expect(normalizeAgentPermissions({ canCreateSkills: false }).canCreateSkills).toBe(false);
+    expect(normalizeAgentPermissions({ canCreateSkills: true }).canCreateSkills).toBe(true);
   });
 
-  it("returns defaults when permissions is an array", () => {
-    const result = normalizeAgentPermissions([], "ceo");
-    expect(result.canCreateAgents).toBe(true);
+  it("leaves omitted canCreateAgents undefined at the schema layer", () => {
+    expect(agentPermissionsSchema.parse({}).canCreateAgents).toBeUndefined();
+    expect(agentPermissionsSchema.parse({ canCreateAgents: false }).canCreateAgents).toBe(false);
+    expect(agentPermissionsSchema.parse({ canCreateAgents: true }).canCreateAgents).toBe(true);
   });
 
-  it("reads canCreateAgents=true from a plain object", () => {
-    const result = normalizeAgentPermissions({ canCreateAgents: true }, "engineer");
-    expect(result.canCreateAgents).toBe(true);
-  });
-
-  it("reads canCreateAgents=false from a plain object", () => {
-    const result = normalizeAgentPermissions({ canCreateAgents: false }, "ceo");
-    expect(result.canCreateAgents).toBe(false);
-  });
-
-  it("falls back to role default when canCreateAgents is not a boolean", () => {
-    // "yes" string → not a boolean → falls back to defaults.canCreateAgents
-    const result = normalizeAgentPermissions({ canCreateAgents: "yes" }, "ceo");
-    expect(result.canCreateAgents).toBe(true); // ceo default = true
-  });
-
-  it("falls back to role default when canCreateAgents key is absent", () => {
-    const result = normalizeAgentPermissions({ otherField: 42 }, "engineer");
-    expect(result.canCreateAgents).toBe(false); // engineer default = false
-  });
-
-  it("ignores extra keys in permissions object (only normalises known fields)", () => {
-    const result = normalizeAgentPermissions({ canCreateAgents: true, unknown: "ignored" }, "engineer");
-    expect(result.canCreateAgents).toBe(true);
+  it("validates skill creation permission with a default-on value", () => {
+    expect(agentPermissionsSchema.parse({ canCreateAgents: false }).canCreateSkills).toBe(true);
+    expect(agentPermissionsSchema.parse({ canCreateAgents: false, canCreateSkills: false }).canCreateSkills).toBe(false);
+    expect(updateAgentPermissionsSchema.parse({
+      canCreateAgents: false,
+      canAssignTasks: false,
+    }).canCreateSkills).toBeUndefined();
+    expect(updateAgentPermissionsSchema.parse({
+      canCreateAgents: false,
+      canCreateSkills: false,
+      canAssignTasks: false,
+    }).canCreateSkills).toBe(false);
   });
 });

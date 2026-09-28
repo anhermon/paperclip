@@ -1,135 +1,198 @@
 import { describe, expect, it } from "vitest";
 import {
-  backupRetentionPolicySchema,
-  instanceGeneralSettingsSchema,
-  patchInstanceGeneralSettingsSchema,
   instanceExperimentalSettingsSchema,
   patchInstanceExperimentalSettingsSchema,
 } from "./instance.js";
 
-describe("backupRetentionPolicySchema", () => {
-  it("accepts all valid preset combinations", () => {
-    for (const dailyDays of [3, 7, 14]) {
-      for (const weeklyWeeks of [1, 2, 4]) {
-        for (const monthlyMonths of [1, 3, 6]) {
-          expect(
-            backupRetentionPolicySchema.safeParse({ dailyDays, weeklyWeeks, monthlyMonths }).success,
-          ).toBe(true);
-        }
-      }
-    }
+describe("instance experimental settings validators", () => {
+  it("defaults chat connectors off independently of Apps and accepts only explicit boolean patches", () => {
+    expect(instanceExperimentalSettingsSchema.parse({}).enableChatConnectors).toBe(false);
+    expect(instanceExperimentalSettingsSchema.parse({ enableApps: true }).enableChatConnectors).toBe(false);
+    expect(patchInstanceExperimentalSettingsSchema.parse({ enableChatConnectors: true }))
+      .toEqual({ enableChatConnectors: true });
+    expect(patchInstanceExperimentalSettingsSchema.parse({ enableChatConnectors: false }))
+      .toEqual({ enableChatConnectors: false });
+    expect(patchInstanceExperimentalSettingsSchema.safeParse({ enableChatConnectors: "true" }).success).toBe(false);
   });
-
-  it("defaults to the default backup retention values", () => {
-    const result = backupRetentionPolicySchema.safeParse({});
-    expect(result.success && result.data.dailyDays).toBe(7);
-    expect(result.success && result.data.weeklyWeeks).toBe(4);
-    expect(result.success && result.data.monthlyMonths).toBe(1);
-  });
-
-  it("rejects a dailyDays value not in presets", () => {
-    expect(backupRetentionPolicySchema.safeParse({ dailyDays: 5 }).success).toBe(false);
-    expect(backupRetentionPolicySchema.safeParse({ dailyDays: 30 }).success).toBe(false);
-  });
-
-  it("rejects a weeklyWeeks value not in presets", () => {
-    expect(backupRetentionPolicySchema.safeParse({ weeklyWeeks: 3 }).success).toBe(false);
-  });
-
-  it("rejects a monthlyMonths value not in presets", () => {
-    expect(backupRetentionPolicySchema.safeParse({ monthlyMonths: 12 }).success).toBe(false);
-  });
-});
-
-describe("instanceGeneralSettingsSchema", () => {
-  it("accepts an empty object (all defaults)", () => {
-    const result = instanceGeneralSettingsSchema.safeParse({});
-    expect(result.success).toBe(true);
-  });
-
-  it("defaults censorUsernameInLogs to false", () => {
-    const result = instanceGeneralSettingsSchema.safeParse({});
-    expect(result.success && result.data.censorUsernameInLogs).toBe(false);
-  });
-
-  it("defaults keyboardShortcuts to false", () => {
-    const result = instanceGeneralSettingsSchema.safeParse({});
-    expect(result.success && result.data.keyboardShortcuts).toBe(false);
-  });
-
-  it("defaults feedbackDataSharingPreference to prompt", () => {
-    const result = instanceGeneralSettingsSchema.safeParse({});
-    expect(result.success && result.data.feedbackDataSharingPreference).toBe("prompt");
-  });
-
-  it("accepts valid feedbackDataSharingPreference values", () => {
-    for (const pref of ["allowed", "not_allowed", "prompt"]) {
-      expect(
-        instanceGeneralSettingsSchema.safeParse({ feedbackDataSharingPreference: pref }).success,
-      ).toBe(true);
-    }
-  });
-
-  it("rejects unknown fields (strict schema)", () => {
+  it("defaults the streamlined UI on and accepts an explicit patch", () => {
+    expect(instanceExperimentalSettingsSchema.parse({}).enableStreamlinedUi).toBe(true);
     expect(
-      instanceGeneralSettingsSchema.safeParse({ unknownField: true }).success,
+      patchInstanceExperimentalSettingsSchema.parse({ enableStreamlinedUi: false }),
+    ).toEqual({ enableStreamlinedUi: false });
+  });
+
+  it("defaults the server info debug view off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableServerInfoDebugView).toBe(false);
+  });
+
+  it("defaults Paperclip developer mode off and accepts explicit patches", () => {
+    expect(instanceExperimentalSettingsSchema.parse({}).enablePaperclipDeveloperMode).toBe(false);
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({ enablePaperclipDeveloperMode: true }),
+    ).toEqual({ enablePaperclipDeveloperMode: true });
+  });
+
+  it("strips retired watchdog and liveness auto-recovery settings", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableTaskWatchdogs: false,
+        enableIssueGraphLivenessAutoRecovery: true,
+        issueGraphLivenessAutoRecoveryLookbackHours: 24,
+      }),
+    ).toEqual({});
+  });
+
+  it("defaults workspace branch repair settings on", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableWorkspaceBranchReconcileForward).toBe(true);
+    expect(settings.enableWorkspaceDirtyQuarantineRepair).toBe(true);
+  });
+
+  it("defaults the goals sidebar link off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableGoalsSidebarLink).toBe(false);
+  });
+
+  it("defaults the sandbox duplex bridge kill switch off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableSandboxDuplexBridge).toBe(false);
+  });
+
+  it("accepts an explicit sandbox duplex bridge kill switch value", () => {
+    expect(
+      instanceExperimentalSettingsSchema.parse({ enableSandboxDuplexBridge: true })
+        .enableSandboxDuplexBridge,
+    ).toBe(true);
+    expect(
+      instanceExperimentalSettingsSchema.parse({ enableSandboxDuplexBridge: false })
+        .enableSandboxDuplexBridge,
     ).toBe(false);
   });
 
-  it("accepts a full valid config", () => {
-    const result = instanceGeneralSettingsSchema.safeParse({
-      censorUsernameInLogs: true,
-      keyboardShortcuts: true,
-      feedbackDataSharingPreference: "allowed",
-      backupRetention: { dailyDays: 3, weeklyWeeks: 1, monthlyMonths: 1 },
+  it("accepts the sandbox duplex bridge kill switch in a patch", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({ enableSandboxDuplexBridge: true }),
+    ).toEqual({ enableSandboxDuplexBridge: true });
+  });
+
+  it("defaults worktree run execution off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableWorktreeRunExecution).toBe(false);
+    expect(settings.worktreeRunExecutionActivatedAt).toBeNull();
+    expect(settings.worktreeRunExecutionActivationInstanceId).toBeNull();
+  });
+
+  it("strips server-managed worktree run execution fields from patches", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableWorktreeRunExecution: true,
+        worktreeRunExecutionActivatedAt: "2026-07-10T12:00:00.000Z",
+        worktreeRunExecutionActivationInstanceId: "copied-instance",
+      }),
+    ).toEqual({
+      enableWorktreeRunExecution: true,
     });
-    expect(result.success).toBe(true);
-  });
-});
-
-describe("patchInstanceGeneralSettingsSchema", () => {
-  it("accepts an empty object (all optional)", () => {
-    expect(patchInstanceGeneralSettingsSchema.safeParse({}).success).toBe(true);
   });
 
-  it("accepts a partial update", () => {
+  it("defaults built-in agents off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableBuiltInAgents).toBe(false);
+  });
+
+  it("defaults beta skills off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableBetaSkills).toBe(false);
+  });
+
+  it("defaults the retired Apps compatibility key on", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableApps).toBe(true);
+  });
+
+  it("accepts worktree run execution patches", () => {
     expect(
-      patchInstanceGeneralSettingsSchema.safeParse({ censorUsernameInLogs: true }).success,
-    ).toBe(true);
-  });
-});
-
-describe("instanceExperimentalSettingsSchema", () => {
-  it("accepts an empty object (all defaults)", () => {
-    const result = instanceExperimentalSettingsSchema.safeParse({});
-    expect(result.success).toBe(true);
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableWorktreeRunExecution: true,
+      }),
+    ).toEqual({
+      enableWorktreeRunExecution: true,
+    });
   });
 
-  it("defaults enableIsolatedWorkspaces to false", () => {
-    const result = instanceExperimentalSettingsSchema.safeParse({});
-    expect(result.success && result.data.enableIsolatedWorkspaces).toBe(false);
+  it("defaults the decisions sidebar link off", () => {
+    const settings = instanceExperimentalSettingsSchema.parse({});
+
+    expect(settings.enableDecisions).toBe(false);
   });
 
-  it("defaults autoRestartDevServerWhenIdle to false", () => {
-    const result = instanceExperimentalSettingsSchema.safeParse({});
-    expect(result.success && result.data.autoRestartDevServerWhenIdle).toBe(false);
-  });
-
-  it("rejects unknown fields (strict schema)", () => {
+  it("accepts decisions patches", () => {
     expect(
-      instanceExperimentalSettingsSchema.safeParse({ unknownField: true }).success,
-    ).toBe(false);
-  });
-});
-
-describe("patchInstanceExperimentalSettingsSchema", () => {
-  it("accepts an empty object (all optional)", () => {
-    expect(patchInstanceExperimentalSettingsSchema.safeParse({}).success).toBe(true);
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableDecisions: true,
+      }),
+    ).toEqual({
+      enableDecisions: true,
+    });
   });
 
-  it("accepts a partial update", () => {
+  it("accepts server info debug view patches", () => {
     expect(
-      patchInstanceExperimentalSettingsSchema.safeParse({ enableIsolatedWorkspaces: true }).success,
-    ).toBe(true);
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableServerInfoDebugView: true,
+      }),
+    ).toEqual({
+      enableServerInfoDebugView: true,
+    });
+  });
+
+  it("accepts workspace branch forward reconciliation patches", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableWorkspaceBranchReconcileForward: false,
+        enableWorkspaceDirtyQuarantineRepair: false,
+      }),
+    ).toEqual({
+      enableWorkspaceBranchReconcileForward: false,
+      enableWorkspaceDirtyQuarantineRepair: false,
+    });
+  });
+
+  it("accepts goals sidebar link patches", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableGoalsSidebarLink: true,
+      }),
+    ).toEqual({
+      enableGoalsSidebarLink: true,
+    });
+  });
+
+  it("accepts built-in agents patches", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableBuiltInAgents: true,
+      }),
+    ).toEqual({
+      enableBuiltInAgents: true,
+    });
+  });
+
+  it("accepts apps patches", () => {
+    expect(
+      patchInstanceExperimentalSettingsSchema.parse({
+        enableApps: true,
+      }),
+    ).toEqual({
+      enableApps: true,
+    });
   });
 });

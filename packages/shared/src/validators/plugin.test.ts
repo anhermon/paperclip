@@ -1,373 +1,442 @@
-import { describe, it, expect } from "vitest";
-import {
-  jsonSchemaSchema,
-  pluginJobDeclarationSchema,
-  pluginWebhookDeclarationSchema,
-  pluginToolDeclarationSchema,
-  pluginUiSlotDeclarationSchema,
-  installPluginSchema,
-  upsertPluginConfigSchema,
-} from "./plugin.js";
+import { describe, expect, it } from "vitest";
+import { PLUGIN_CAPABILITIES } from "../constants.js";
+import { resolveDeclaredSandboxCapabilities } from "../environment-support.js";
+import { pluginManagedRoutineDeclarationSchema, pluginManifestV1Schema, pluginUiSlotDeclarationSchema } from "./plugin.js";
 
-// ---------------------------------------------------------------------------
-// jsonSchemaSchema
-// ---------------------------------------------------------------------------
-
-describe("jsonSchemaSchema", () => {
-  it("accepts an empty object (no fields required)", () => {
-    expect(jsonSchemaSchema.safeParse({}).success).toBe(true);
-  });
-
-  it("accepts an object with a 'type' field", () => {
-    expect(jsonSchemaSchema.safeParse({ type: "object", properties: {} }).success).toBe(true);
-  });
-
-  it("accepts an object with a '$ref' field", () => {
-    expect(jsonSchemaSchema.safeParse({ $ref: "#/definitions/Foo" }).success).toBe(true);
-  });
-
-  it("accepts an object with an 'oneOf' field", () => {
-    expect(jsonSchemaSchema.safeParse({ oneOf: [{ type: "string" }] }).success).toBe(true);
-  });
-
-  it("accepts an object with an 'anyOf' field", () => {
-    expect(jsonSchemaSchema.safeParse({ anyOf: [{ type: "string" }] }).success).toBe(true);
-  });
-
-  it("accepts an object with an 'allOf' field", () => {
-    expect(jsonSchemaSchema.safeParse({ allOf: [{ type: "object" }] }).success).toBe(true);
-  });
-
-  it("rejects a non-empty object missing type/$ref/composition keywords", () => {
-    expect(jsonSchemaSchema.safeParse({ description: "just a description" }).success).toBe(false);
-  });
-
-  it("rejects a non-object value (string)", () => {
-    expect(jsonSchemaSchema.safeParse("not-an-object").success).toBe(false);
-  });
-
-  it("rejects an array", () => {
-    expect(jsonSchemaSchema.safeParse([]).success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// pluginJobDeclarationSchema
-// ---------------------------------------------------------------------------
-
-describe("pluginJobDeclarationSchema", () => {
-  it("accepts a minimal valid job declaration (no schedule)", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "daily-sync",
-      displayName: "Daily Sync",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("accepts a job with a valid cron schedule", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "hourly",
-      displayName: "Hourly Job",
-      schedule: "0 * * * *",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("accepts a job with a wildcard schedule", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "minutely",
-      displayName: "Minutely",
-      schedule: "* * * * *",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a job with an invalid cron schedule", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "bad",
-      displayName: "Bad Job",
-      schedule: "not-a-cron",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a job with an empty jobKey", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "",
-      displayName: "Job",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a job with an empty displayName", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "my-job",
-      displayName: "",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts a description field", () => {
-    const result = pluginJobDeclarationSchema.safeParse({
-      jobKey: "my-job",
-      displayName: "My Job",
-      description: "Does something",
-    });
-    expect(result.success).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// pluginWebhookDeclarationSchema
-// ---------------------------------------------------------------------------
-
-describe("pluginWebhookDeclarationSchema", () => {
-  it("accepts a minimal valid webhook declaration", () => {
-    const result = pluginWebhookDeclarationSchema.safeParse({
-      endpointKey: "push",
-      displayName: "Push Event",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("accepts an optional description", () => {
-    const result = pluginWebhookDeclarationSchema.safeParse({
-      endpointKey: "push",
-      displayName: "Push Event",
-      description: "Fired on push",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects an empty endpointKey", () => {
-    const result = pluginWebhookDeclarationSchema.safeParse({
-      endpointKey: "",
-      displayName: "Push Event",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects an empty displayName", () => {
-    const result = pluginWebhookDeclarationSchema.safeParse({
-      endpointKey: "push",
-      displayName: "",
-    });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// pluginToolDeclarationSchema
-// ---------------------------------------------------------------------------
-
-describe("pluginToolDeclarationSchema", () => {
-  const VALID_TOOL = {
-    name: "search_issues",
-    displayName: "Search Issues",
-    description: "Search for issues by query",
-    parametersSchema: { type: "object", properties: {} },
+function buildSandboxProviderManifest(driver: Record<string, unknown>) {
+  return {
+    id: "paperclip.capability-provider",
+    apiVersion: 1,
+    version: "0.1.0",
+    displayName: "Capability Provider",
+    description: "Sandbox provider that declares fine-grained capabilities.",
+    author: "Paperclip",
+    categories: ["automation"],
+    capabilities: ["environment.drivers.register"],
+    entrypoints: { worker: "./dist/worker.js" },
+    environmentDrivers: [
+      {
+        driverKey: "capability-provider",
+        kind: "sandbox_provider",
+        displayName: "Capability Provider",
+        configSchema: { type: "object" },
+        ...driver,
+      },
+    ],
   };
+}
 
-  it("accepts a valid tool declaration", () => {
-    expect(pluginToolDeclarationSchema.safeParse(VALID_TOOL).success).toBe(true);
-  });
-
-  it("rejects when name is empty", () => {
-    expect(pluginToolDeclarationSchema.safeParse({ ...VALID_TOOL, name: "" }).success).toBe(false);
-  });
-
-  it("rejects when displayName is empty", () => {
-    expect(pluginToolDeclarationSchema.safeParse({ ...VALID_TOOL, displayName: "" }).success).toBe(false);
-  });
-
-  it("rejects when description is empty", () => {
-    expect(pluginToolDeclarationSchema.safeParse({ ...VALID_TOOL, description: "" }).success).toBe(false);
-  });
-
-  it("rejects when parametersSchema is a string (not an object)", () => {
-    expect(
-      pluginToolDeclarationSchema.safeParse({ ...VALID_TOOL, parametersSchema: "string" }).success,
-    ).toBe(false);
-  });
-
-  it("rejects when parametersSchema is missing type/$ref/composition (non-empty)", () => {
-    expect(
-      pluginToolDeclarationSchema.safeParse({
-        ...VALID_TOOL,
-        parametersSchema: { description: "no type" },
-      }).success,
-    ).toBe(false);
+describe("plugin capability constants", () => {
+  it("exposes each capability once", () => {
+    expect(new Set(PLUGIN_CAPABILITIES).size).toBe(PLUGIN_CAPABILITIES.length);
   });
 });
 
-// ---------------------------------------------------------------------------
-// pluginUiSlotDeclarationSchema
-// ---------------------------------------------------------------------------
-
-describe("pluginUiSlotDeclarationSchema", () => {
-  const VALID_SIDEBAR_SLOT = {
-    type: "sidebar",
-    id: "my-sidebar",
-    displayName: "My Sidebar",
-    exportName: "MySidebar",
-  };
-
-  const VALID_DETAIL_TAB_SLOT = {
-    type: "detailTab",
-    id: "my-tab",
-    displayName: "My Tab",
-    exportName: "MyTab",
-    entityTypes: ["issue"],
-  };
-
-  it("accepts a valid sidebar slot", () => {
-    expect(pluginUiSlotDeclarationSchema.safeParse(VALID_SIDEBAR_SLOT).success).toBe(true);
-  });
-
-  it("accepts a valid detailTab slot with entityTypes", () => {
-    expect(pluginUiSlotDeclarationSchema.safeParse(VALID_DETAIL_TAB_SLOT).success).toBe(true);
-  });
-
-  it("rejects a detailTab slot without entityTypes", () => {
-    const { entityTypes: _, ...withoutEntityTypes } = VALID_DETAIL_TAB_SLOT;
-    expect(pluginUiSlotDeclarationSchema.safeParse(withoutEntityTypes).success).toBe(false);
-  });
-
-  it("rejects a contextMenuItem slot without entityTypes", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "contextMenuItem",
-      id: "my-menu",
-      displayName: "My Menu",
-      exportName: "MyMenu",
+describe("plugin manifest validators", () => {
+  it("accepts existing-style plugins that do not request access or authorization capabilities", () => {
+    const parsed = pluginManifestV1Schema.parse({
+      id: "paperclip.compat-dashboard",
+      apiVersion: 1,
+      version: "0.1.0",
+      displayName: "Compat Dashboard",
+      description: "Dashboard-only plugin without access or authorization host APIs.",
+      author: "Paperclip",
+      categories: ["ui"],
+      capabilities: ["ui.dashboardWidget.register"],
+      entrypoints: {
+        worker: "./dist/worker.js",
+        ui: "./dist/ui.js",
+      },
+      ui: {
+        slots: [
+          {
+            type: "dashboardWidget",
+            id: "compat-dashboard",
+            displayName: "Compat Dashboard",
+            exportName: "CompatDashboard",
+          },
+        ],
+      },
     });
-    expect(result.success).toBe(false);
+
+    expect(parsed.capabilities).toEqual(["ui.dashboardWidget.register"]);
   });
 
-  it("accepts a page slot with a valid routePath", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "page",
-      id: "my-page",
-      displayName: "My Page",
-      exportName: "MyPage",
-      routePath: "my-page",
+  it("accepts sandbox provider template config bindings", () => {
+    const parsed = pluginManifestV1Schema.parse({
+      id: "paperclip.template-provider",
+      apiVersion: 1,
+      version: "0.1.0",
+      displayName: "Template Provider",
+      description: "Sandbox provider with captured template config binding.",
+      author: "Paperclip",
+      categories: ["automation"],
+      capabilities: ["environment.drivers.register"],
+      entrypoints: { worker: "./dist/worker.js" },
+      environmentDrivers: [
+        {
+          driverKey: "template-provider",
+          kind: "sandbox_provider",
+          displayName: "Template Provider",
+          supportsTemplateCapture: true,
+          templateRefKind: "provider_template",
+          templateConfigBinding: {
+            field: "templateId",
+            unsetFields: ["image"],
+          },
+          configSchema: { type: "object" },
+        },
+      ],
     });
-    expect(result.success).toBe(true);
+
+    expect(parsed.environmentDrivers?.[0]?.templateConfigBinding).toEqual({
+      field: "templateId",
+      unsetFields: ["image"],
+    });
   });
 
-  it("rejects a sidebar slot with a routePath (not supported)", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      ...VALID_SIDEBAR_SLOT,
-      routePath: "some-path",
+  it("rejects template config bindings that replace provider identity", () => {
+    const parsed = pluginManifestV1Schema.safeParse({
+      id: "paperclip.bad-template-provider",
+      apiVersion: 1,
+      version: "0.1.0",
+      displayName: "Bad Template Provider",
+      categories: ["automation"],
+      capabilities: ["environment.drivers.register"],
+      entrypoints: { worker: "./dist/worker.js" },
+      environmentDrivers: [
+        {
+          driverKey: "bad-template-provider",
+          kind: "sandbox_provider",
+          displayName: "Bad Template Provider",
+          templateConfigBinding: {
+            field: "provider",
+          },
+          configSchema: { type: "object" },
+        },
+      ],
     });
-    expect(result.success).toBe(false);
-  });
 
-  it("rejects a page slot with an invalid routePath (uppercase)", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "page",
-      id: "my-page",
-      displayName: "My Page",
-      exportName: "MyPage",
-      routePath: "MyPage",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a projectSidebarItem slot without entityTypes including 'project'", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "projectSidebarItem",
-      id: "proj-item",
-      displayName: "Proj Item",
-      exportName: "ProjItem",
-      entityTypes: ["issue"], // missing 'project'
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts a projectSidebarItem slot with entityTypes including 'project'", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "projectSidebarItem",
-      id: "proj-item",
-      displayName: "Proj Item",
-      exportName: "ProjItem",
-      entityTypes: ["project"],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a commentAnnotation slot without entityTypes including 'comment'", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "commentAnnotation",
-      id: "annotation",
-      displayName: "Annotation",
-      exportName: "Annotation",
-      entityTypes: ["issue"], // missing 'comment'
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts a commentAnnotation slot with entityTypes including 'comment'", () => {
-    const result = pluginUiSlotDeclarationSchema.safeParse({
-      type: "commentAnnotation",
-      id: "annotation",
-      displayName: "Annotation",
-      exportName: "Annotation",
-      entityTypes: ["comment"],
-    });
-    expect(result.success).toBe(true);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.some((issue) => issue.message.includes("provider key"))).toBe(true);
   });
 });
 
-// ---------------------------------------------------------------------------
-// installPluginSchema
-// ---------------------------------------------------------------------------
+describe("plugin managed routine validators", () => {
+  it("accepts core issue surface visibility values in routine templates", () => {
+    const parsed = pluginManagedRoutineDeclarationSchema.parse({
+      routineKey: "wiki.refresh",
+      title: "Refresh Wiki",
+      activityGatePolicy: "require_external_activity",
+      activityGateScope: "project",
+      issueTemplate: { surfaceVisibility: "default" },
+    });
 
-describe("installPluginSchema", () => {
-  it("accepts a minimal install request with just packageName", () => {
-    expect(installPluginSchema.safeParse({ packageName: "my-plugin" }).success).toBe(true);
+    expect(parsed.issueTemplate?.surfaceVisibility).toBe("default");
+    expect(parsed.activityGatePolicy).toBe("require_external_activity");
+    expect(parsed.activityGateScope).toBe("project");
   });
 
-  it("accepts an install request with an optional version", () => {
-    expect(installPluginSchema.safeParse({ packageName: "my-plugin", version: "1.0.0" }).success).toBe(true);
-  });
+  it("rejects non-core issue surface visibility values in routine templates", () => {
+    const parsed = pluginManagedRoutineDeclarationSchema.safeParse({
+      routineKey: "wiki.refresh",
+      title: "Refresh Wiki",
+      issueTemplate: { surfaceVisibility: "normal" },
+    });
 
-  it("accepts an install request with a packagePath", () => {
-    expect(installPluginSchema.safeParse({ packageName: "my-plugin", packagePath: "/path/to/pkg" }).success).toBe(true);
-  });
-
-  it("rejects an empty packageName", () => {
-    expect(installPluginSchema.safeParse({ packageName: "" }).success).toBe(false);
-  });
-
-  it("rejects a missing packageName", () => {
-    expect(installPluginSchema.safeParse({}).success).toBe(false);
+    expect(parsed.success).toBe(false);
   });
 });
 
-// ---------------------------------------------------------------------------
-// upsertPluginConfigSchema
-// ---------------------------------------------------------------------------
+describe("plugin managed skill validators", () => {
+  const baseManifest = {
+    id: "paperclip.test-managed-skills",
+    apiVersion: 1,
+    version: "0.1.0",
+    displayName: "Managed Skills",
+    description: "Managed skills test plugin.",
+    author: "Paperclip",
+    categories: ["automation"],
+    entrypoints: { worker: "./dist/worker.js" },
+  } as const;
 
-describe("upsertPluginConfigSchema", () => {
-  it("accepts a config with an empty configJson object", () => {
-    expect(upsertPluginConfigSchema.safeParse({ configJson: {} }).success).toBe(true);
+  it("requires skills.managed when managed skills are declared", () => {
+    const parsed = pluginManifestV1Schema.safeParse({
+      ...baseManifest,
+      capabilities: [],
+      skills: [{ skillKey: "wiki-maintainer", displayName: "Wiki Maintainer" }],
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.some((issue) => issue.message.includes("skills.managed"))).toBe(true);
   });
 
-  it("accepts a config with arbitrary key-value pairs in configJson", () => {
-    expect(
-      upsertPluginConfigSchema.safeParse({ configJson: { key: "value", num: 42 } }).success,
-    ).toBe(true);
+  it("accepts managed skills with the skills.managed capability", () => {
+    const parsed = pluginManifestV1Schema.parse({
+      ...baseManifest,
+      capabilities: ["skills.managed"],
+      skills: [{ skillKey: "wiki-maintainer", displayName: "Wiki Maintainer" }],
+    });
+
+    expect(parsed.skills?.[0]?.skillKey).toBe("wiki-maintainer");
+  });
+});
+
+describe("plugin UI slot validators", () => {
+  it("accepts route-scoped sidebar slots with a routePath", () => {
+    const parsed = pluginUiSlotDeclarationSchema.parse({
+      type: "routeSidebar",
+      id: "wiki-route-sidebar",
+      displayName: "Wiki Sidebar",
+      exportName: "WikiSidebar",
+      routePath: "wiki",
+    });
+
+    expect(parsed.routePath).toBe("wiki");
   });
 
-  it("rejects when configJson is missing", () => {
-    expect(upsertPluginConfigSchema.safeParse({}).success).toBe(false);
+  it("requires route-scoped sidebar slots to declare a routePath", () => {
+    const parsed = pluginUiSlotDeclarationSchema.safeParse({
+      type: "routeSidebar",
+      id: "wiki-route-sidebar",
+      displayName: "Wiki Sidebar",
+      exportName: "WikiSidebar",
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues[0]?.message).toBe("routeSidebar slots require routePath");
   });
 
-  it("rejects when configJson is not an object", () => {
-    expect(upsertPluginConfigSchema.safeParse({ configJson: "not-an-object" }).success).toBe(false);
+  it("keeps reserved company route protection for route-scoped sidebars", () => {
+    const parsed = pluginUiSlotDeclarationSchema.safeParse({
+      type: "routeSidebar",
+      id: "settings-route-sidebar",
+      displayName: "Settings Sidebar",
+      exportName: "SettingsSidebar",
+      routePath: "settings",
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.some((issue) => issue.message.includes("reserved by the host"))).toBe(true);
   });
 
-  it("rejects when configJson is an array", () => {
-    expect(upsertPluginConfigSchema.safeParse({ configJson: [] }).success).toBe(false);
+  it("accepts workspace entity types as detailTab targets", () => {
+    const parsed = pluginUiSlotDeclarationSchema.parse({
+      type: "detailTab",
+      id: "workspace-diff-viewer",
+      displayName: "Diff",
+      exportName: "WorkspaceDiffViewer",
+      entityTypes: ["execution_workspace", "project_workspace"],
+    });
+
+    expect(parsed.entityTypes).toEqual(["execution_workspace", "project_workspace"]);
+  });
+
+  it("accepts execution_workspace as a toolbarButton entityType", () => {
+    const parsed = pluginUiSlotDeclarationSchema.parse({
+      type: "toolbarButton",
+      id: "workspace-open-diff",
+      displayName: "Open diff",
+      exportName: "OpenWorkspaceDiffButton",
+      entityTypes: ["execution_workspace"],
+    });
+
+    expect(parsed.entityTypes).toEqual(["execution_workspace"]);
+  });
+
+  it("accepts company settings page slots with a non-core settings route", () => {
+    const parsed = pluginUiSlotDeclarationSchema.parse({
+      type: "companySettingsPage",
+      id: "permissions-settings",
+      displayName: "Permissions",
+      exportName: "PermissionsSettingsPage",
+      routePath: "permissions",
+    });
+
+    expect(parsed.routePath).toBe("permissions");
+  });
+
+  it("prevents company settings page slots from shadowing core settings routes", () => {
+    const parsed = pluginUiSlotDeclarationSchema.safeParse({
+      type: "companySettingsPage",
+      id: "instance-settings",
+      displayName: "Instance",
+      exportName: "InstanceSettingsPage",
+      routePath: "instance",
+    });
+
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues.some((issue) => issue.message.includes("reserved by the host"))).toBe(true);
+  });
+});
+
+describe("sandbox provider capability declaration validators", () => {
+  it("preserves a declared acquisition budget and keeps it optional", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({ defaultAcquireTimeoutMs: 300_000 }),
+    );
+    expect(parsed.environmentDrivers?.[0]?.defaultAcquireTimeoutMs).toBe(300_000);
+    const legacy = pluginManifestV1Schema.parse(buildSandboxProviderManifest({}));
+    expect(legacy.environmentDrivers?.[0]?.defaultAcquireTimeoutMs).toBeUndefined();
+  });
+
+  it.each([0, -1, 1.5, Infinity, NaN, "300000", 86_400_001])(
+    "rejects an invalid acquisition budget: %s",
+    (defaultAcquireTimeoutMs) => {
+      expect(pluginManifestV1Schema.safeParse(
+        buildSandboxProviderManifest({ defaultAcquireTimeoutMs }),
+      ).success).toBe(false);
+    },
+  );
+
+  it("test_manifest_accepts_sandbox_capabilities_and_rejects_unknown_capability_keys", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({
+        sandboxCapabilities: {
+          reusableLeases: true,
+          nativeSyncIn: true,
+          nativeSyncOut: false,
+          persistentProcessSessions: true,
+          independentControlCommands: false,
+          incrementalSessionOutput: true,
+        },
+      }),
+    );
+
+    expect(parsed.environmentDrivers?.[0]?.sandboxCapabilities).toEqual({
+      reusableLeases: true,
+      nativeSyncIn: true,
+      nativeSyncOut: false,
+      persistentProcessSessions: true,
+      independentControlCommands: false,
+      incrementalSessionOutput: true,
+    });
+
+    const rejected = pluginManifestV1Schema.safeParse(
+      buildSandboxProviderManifest({
+        sandboxCapabilities: {
+          reusableLeases: true,
+          // A typo or unknown capability name must fail validation, not drop
+          // silently. The nested schema is `.strict()`.
+          nativeSync: true,
+        },
+      }),
+    );
+
+    expect(rejected.success).toBe(false);
+  });
+
+  it("test_manifest_accepts_concurrent_sync_operations_capability", () => {
+    // A provider opts in to parallel bidirectional file sync with this key. The
+    // strict schema accepts it and keeps the declared value.
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({
+        sandboxCapabilities: { concurrentSyncOperations: true },
+      }),
+    );
+
+    expect(parsed.environmentDrivers?.[0]?.sandboxCapabilities).toEqual({
+      concurrentSyncOperations: true,
+    });
+  });
+
+  it("test_manifest_rejects_unknown_sync_concurrency_capability_key", () => {
+    // A neighboring but unknown concurrency key must fail validation, not drop
+    // silently. The strict schema rejects a capability the host does not honor.
+    const rejected = pluginManifestV1Schema.safeParse(
+      buildSandboxProviderManifest({
+        sandboxCapabilities: { concurrentSyncAndExec: true },
+      }),
+    );
+    expect(rejected.success).toBe(false);
+  });
+
+  it("test_supports_reusable_leases_compat_maps_to_reusable_leases", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({ supportsReusableLeases: true }),
+    );
+    const driver = parsed.environmentDrivers?.[0];
+
+    expect(driver?.sandboxCapabilities).toBeUndefined();
+    expect(resolveDeclaredSandboxCapabilities(driver!).reusableLeases).toBe(true);
+  });
+
+  it("test_sandbox_capabilities_reusable_leases_wins_over_compat_field", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({
+        supportsReusableLeases: true,
+        sandboxCapabilities: { reusableLeases: false },
+      }),
+    );
+    const driver = parsed.environmentDrivers?.[0];
+
+    // The nested declaration wins over the legacy compat flag when both exist.
+    expect(resolveDeclaredSandboxCapabilities(driver!).reusableLeases).toBe(false);
+  });
+});
+
+describe("login pty transport capability and legacy alias", () => {
+  it("test_login_pty_new_field_parses_and_carries_the_flag", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({ supportsLoginPty: true }),
+    );
+
+    expect(parsed.environmentDrivers?.[0]?.supportsLoginPty).toBe(true);
+  });
+
+  it("test_legacy_alias_only_canonicalizes_onto_login_pty", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({ supportsSetupTokenLogin: true }),
+    );
+    const driver = parsed.environmentDrivers?.[0];
+
+    // The validator maps the deprecated alias onto the canonical field at parse
+    // time, and it drops the alias so a downstream reader cannot read the old
+    // name.
+    expect(driver?.supportsLoginPty).toBe(true);
+    expect(driver).not.toHaveProperty("supportsSetupTokenLogin");
+  });
+
+  it("test_conflicting_alias_and_new_field_reject", () => {
+    const rejected = pluginManifestV1Schema.safeParse(
+      buildSandboxProviderManifest({
+        supportsLoginPty: true,
+        supportsSetupTokenLogin: false,
+      }),
+    );
+
+    expect(rejected.success).toBe(false);
+  });
+
+  it("test_matching_alias_and_new_field_pass", () => {
+    const parsed = pluginManifestV1Schema.parse(
+      buildSandboxProviderManifest({
+        supportsLoginPty: true,
+        supportsSetupTokenLogin: true,
+      }),
+    );
+
+    expect(parsed.environmentDrivers?.[0]?.supportsLoginPty).toBe(true);
+  });
+
+  it("test_unknown_login_field_misspelling_rejects", () => {
+    const rejected = pluginManifestV1Schema.safeParse(
+      buildSandboxProviderManifest({ supportsLoginPTY: true }),
+    );
+
+    expect(rejected.success).toBe(false);
+  });
+
+  it("test_login_pty_accepts_literal_booleans_only", () => {
+    const rejected = pluginManifestV1Schema.safeParse(
+      buildSandboxProviderManifest({ supportsLoginPty: "true" }),
+    );
+
+    expect(rejected.success).toBe(false);
   });
 });
