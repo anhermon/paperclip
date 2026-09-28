@@ -19,14 +19,12 @@ export function unauthorized(message = "Unauthorized") {
   return new HttpError(401, message);
 }
 
-/** Creates an HTTP 403 Forbidden error. */
-export function forbidden(message = "Forbidden") {
-  return new HttpError(403, message);
+export function forbidden(message = "Forbidden", details?: unknown) {
+  return new HttpError(403, message, details);
 }
 
-/** Creates an HTTP 404 Not Found error. */
-export function notFound(message = "Not found") {
-  return new HttpError(404, message);
+export function notFound(message = "Not found", details?: unknown) {
+  return new HttpError(404, message, details);
 }
 
 /** Creates an HTTP 409 Conflict error. */
@@ -34,7 +32,18 @@ export function conflict(message: string, details?: unknown) {
   return new HttpError(409, message, details);
 }
 
-/** Creates an HTTP 422 Unprocessable Entity error. */
+export function payloadTooLarge(message: string, details?: unknown) {
+  return new HttpError(413, message, details);
+}
+
+export function unsupportedMediaType(message: string, details?: unknown) {
+  return new HttpError(415, message, details);
+}
+
 export function unprocessable(message: string, details?: unknown) {
   return new HttpError(422, message, details);
+}
+
+export function tooManyRequests(message = "Too many requests", details?: unknown) {
+  return new HttpError(429, message, details);
 }

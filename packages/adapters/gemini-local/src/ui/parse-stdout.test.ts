@@ -1,217 +1,81 @@
 import { describe, expect, it } from "vitest";
 import { parseGeminiStdoutLine } from "./parse-stdout.js";
 
-const TS = "2026-04-17T00:00:00.000Z";
+const ts = "2026-05-04T05:43:45.198Z";
 
-// ============================================================================
-// Non-JSON fallback
-// ============================================================================
-
-describe("parseGeminiStdoutLine — non-JSON input", () => {
-  it("wraps plain text in a stdout entry", () => {
-    const result = parseGeminiStdoutLine("hello world", TS);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ kind: "stdout", text: "hello world", ts: TS });
-  });
-
-  it("wraps malformed JSON in a stdout entry", () => {
-    const result = parseGeminiStdoutLine("{not json}", TS);
-    expect(result[0]?.kind).toBe("stdout");
-  });
-
-  it("wraps blank line in a stdout entry", () => {
-    const result = parseGeminiStdoutLine("", TS);
-    expect(result[0]?.kind).toBe("stdout");
-  });
-});
-
-// ============================================================================
-// system / init event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — system init", () => {
-  it("returns an init entry with sessionId and model", () => {
+describe("parseGeminiStdoutLine", () => {
+  it("renders v0.38 message+role:assistant as an assistant transcript entry", () => {
     const line = JSON.stringify({
-      type: "system",
-      subtype: "init",
-      session_id: "sess-42",
-      model: "gemini-2.0",
+      type: "message",
+      role: "assistant",
+      content: "hello.",
+      delta: true,
     });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ kind: "init", model: "gemini-2.0", sessionId: "sess-42" });
+    const entries = parseGeminiStdoutLine(line, ts);
+    expect(entries).toEqual([{ kind: "assistant", ts, text: "hello." }]);
   });
 
-  it("uses thread_id as session fallback when session_id is absent", () => {
+  it("renders v0.38 message+role:user as a user transcript entry", () => {
     const line = JSON.stringify({
-      type: "system",
-      subtype: "init",
-      thread_id: "thread-99",
-      model: "gemini-pro",
+      type: "message",
+      role: "user",
+      content: "Respond with hello.",
     });
-    const result = parseGeminiStdoutLine(line, TS);
-    const entry = result[0] as { kind: string; sessionId?: string };
-    expect(entry.sessionId).toBe("thread-99");
+    const entries = parseGeminiStdoutLine(line, ts);
+    expect(entries).toEqual([{ kind: "user", ts, text: "Respond with hello." }]);
   });
 
-  it("returns a system entry for other subtypes", () => {
-    const line = JSON.stringify({ type: "system", subtype: "unknown_subtype" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result[0]?.kind).toBe("system");
-  });
-
-  it("returns stderr for system error subtype", () => {
-    const line = JSON.stringify({
-      type: "system",
-      subtype: "error",
-      error: "quota exceeded",
-    });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result[0]?.kind).toBe("stderr");
-    const entry = result[0] as { kind: string; text: string };
-    expect(entry.text).toContain("quota exceeded");
-  });
-});
-
-// ============================================================================
-// assistant event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — assistant", () => {
-  it("extracts text content from assistant message", () => {
+  it("preserves the legacy claude-style assistant event handler", () => {
     const line = JSON.stringify({
       type: "assistant",
-      message: {
-        content: [{ type: "text", text: "Hello there!" }],
+      message: { content: [{ type: "output_text", text: "legacy hello" }] },
+    });
+    const entries = parseGeminiStdoutLine(line, ts);
+    expect(entries).toEqual([{ kind: "assistant", ts, text: "legacy hello" }]);
+  });
+
+  it("reads token usage from v0.38 result.stats", () => {
+    const line = JSON.stringify({
+      type: "result",
+      status: "success",
+      stats: {
+        total_tokens: 9468,
+        input_tokens: 9095,
+        output_tokens: 29,
+        cached: 8132,
       },
     });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result.some((e) => e.kind === "assistant")).toBe(true);
-    const entry = result.find((e) => e.kind === "assistant") as { kind: string; text: string } | undefined;
-    expect(entry?.text).toContain("Hello there!");
-  });
-});
-
-// ============================================================================
-// thinking event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — thinking", () => {
-  it("returns a thinking entry for type=thinking with text", () => {
-    const line = JSON.stringify({ type: "thinking", text: "reasoning..." });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ kind: "thinking", text: "reasoning..." });
+    const [entry] = parseGeminiStdoutLine(line, ts);
+    expect(entry).toMatchObject({
+      kind: "result",
+      inputTokens: 9095,
+      outputTokens: 29,
+      cachedTokens: 8132,
+      isError: false,
+      subtype: "success",
+    });
   });
 
-  it("returns empty for thinking with no text", () => {
-    const line = JSON.stringify({ type: "thinking", text: "" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(0);
-  });
-});
-
-// ============================================================================
-// text event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — text", () => {
-  it("returns an assistant entry for type=text", () => {
-    const line = JSON.stringify({ type: "text", text: "Here is my response." });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ kind: "assistant", text: "Here is my response." });
-  });
-
-  it("returns empty for type=text with blank text", () => {
-    const line = JSON.stringify({ type: "text", text: "   " });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(0);
-  });
-});
-
-// ============================================================================
-// result event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — result", () => {
-  it("returns a result entry with usage fields", () => {
+  it("flags v0.38 result.status=error as an error", () => {
     const line = JSON.stringify({
       type: "result",
-      result: "Task complete",
-      total_cost_usd: 0.012,
-      usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 20 },
+      status: "error",
+      error: "boom",
     });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(1);
-    const entry = result[0] as { kind: string; text: string; costUsd: number; inputTokens: number };
-    expect(entry.kind).toBe("result");
-    expect(entry.text).toBe("Task complete");
-    expect(entry.costUsd).toBe(0.012);
-    expect(entry.inputTokens).toBe(100);
+    const [entry] = parseGeminiStdoutLine(line, ts);
+    expect(entry).toMatchObject({ kind: "result", isError: true, errors: ["boom"] });
   });
 
-  it("returns an error result for is_error=true", () => {
-    const line = JSON.stringify({
-      type: "result",
-      is_error: true,
-      error: "something failed",
-    });
-    const result = parseGeminiStdoutLine(line, TS);
-    const entry = result[0] as { kind: string; isError: boolean; errors: string[] };
-    expect(entry.kind).toBe("result");
-    expect(entry.isError).toBe(true);
-    expect(entry.errors).toContain("something failed");
-  });
-});
-
-// ============================================================================
-// error event
-// ============================================================================
-
-describe("parseGeminiStdoutLine — error", () => {
-  it("returns a stderr entry for type=error with string error", () => {
-    const line = JSON.stringify({ type: "error", error: "auth failed" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.kind).toBe("stderr");
-    const entry = result[0] as { kind: string; text: string };
-    expect(entry.text).toContain("auth failed");
+  it("ignores message events without an actionable role", () => {
+    const line = JSON.stringify({ type: "message", role: "system", content: "ignored" });
+    expect(parseGeminiStdoutLine(line, ts)).toEqual([]);
   });
 
-  it("returns a stderr entry with fallback text for empty error", () => {
-    const line = JSON.stringify({ type: "error" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result[0]?.kind).toBe("stderr");
-  });
-});
+  it("delegates ACPX events to the shared ACPX transcript parser", () => {
+    const line = JSON.stringify({ type: "acpx.text_delta", text: "hello from acp" });
 
-// ============================================================================
-// step_finish / step_complete
-// ============================================================================
-
-describe("parseGeminiStdoutLine — step_finish / step_complete", () => {
-  it("returns empty array for type=step_finish", () => {
-    const line = JSON.stringify({ type: "step_finish" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(0);
-  });
-
-  it("returns empty array for type=step_complete", () => {
-    const line = JSON.stringify({ type: "step_complete" });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result).toHaveLength(0);
-  });
-});
-
-// ============================================================================
-// unknown type fallback
-// ============================================================================
-
-describe("parseGeminiStdoutLine — unknown type", () => {
-  it("falls through to stdout for unknown event types", () => {
-    const line = JSON.stringify({ type: "mystery_event", data: {} });
-    const result = parseGeminiStdoutLine(line, TS);
-    expect(result[0]?.kind).toBe("stdout");
+    expect(parseGeminiStdoutLine(line, ts)).toEqual([
+      { kind: "assistant", ts, text: "hello from acp", delta: true },
+    ]);
   });
 });

@@ -18,16 +18,55 @@ export const asBoolean = serverUtils.asBoolean;
 export const asStringArray = serverUtils.asStringArray;
 export const parseJson = serverUtils.parseJson;
 export const appendWithCap = serverUtils.appendWithCap;
+export const appendWithByteCap = serverUtils.appendWithByteCap;
 export const resolvePathValue = serverUtils.resolvePathValue;
 export const renderTemplate = serverUtils.renderTemplate;
 export const redactEnvForLogs = serverUtils.redactEnvForLogs;
 export const buildPaperclipEnv = serverUtils.buildPaperclipEnv;
+export const buildRuntimeToolsEnv = serverUtils.buildRuntimeToolsEnv;
+export const isPaperclipRuntimeEnvKey = serverUtils.isPaperclipRuntimeEnvKey;
+export const isForbiddenConfigEnvKey = serverUtils.isForbiddenConfigEnvKey;
 export const defaultPathForPlatform = serverUtils.defaultPathForPlatform;
 export const ensurePathInEnv = serverUtils.ensurePathInEnv;
 export const ensureAbsoluteDirectory = serverUtils.ensureAbsoluteDirectory;
 export const ensureCommandResolvable = serverUtils.ensureCommandResolvable;
 export const resolveCommandForLogs = serverUtils.resolveCommandForLogs;
-export const buildInvocationEnvForLogs = serverUtils.buildInvocationEnvForLogs;
+
+export function buildInvocationEnvForLogs(
+  env: Record<string, string>,
+  options: BuildInvocationEnvForLogsOptions = {},
+): Record<string, string> {
+  const maybeBuildInvocationEnvForLogs = (
+    serverUtils as typeof serverUtils & {
+      buildInvocationEnvForLogs?: (
+        env: Record<string, string>,
+        options?: BuildInvocationEnvForLogsOptions,
+      ) => Record<string, string>;
+    }
+  ).buildInvocationEnvForLogs;
+
+  if (typeof maybeBuildInvocationEnvForLogs === "function") {
+    return maybeBuildInvocationEnvForLogs(env, options);
+  }
+
+  const merged: Record<string, string> = { ...env };
+  const runtimeEnv = options.runtimeEnv ?? {};
+
+  for (const key of options.includeRuntimeKeys ?? []) {
+    if (key in merged) continue;
+    const value = runtimeEnv[key];
+    if (typeof value !== "string" || value.length === 0) continue;
+    merged[key] = value;
+  }
+
+  const resolvedCommand = options.resolvedCommand?.trim();
+  if (resolvedCommand) {
+    merged[options.resolvedCommandEnvKey ?? "PAPERCLIP_RESOLVED_COMMAND"] =
+      serverUtils.redactCommandTextForLogs(resolvedCommand);
+  }
+
+  return redactEnvForLogs(merged);
+}
 
 // Re-export runChildProcess with the server's pino logger wired in.
 const _runChildProcess = serverUtils.runChildProcess;
@@ -42,6 +81,7 @@ export async function runChildProcess(
     timeoutSec: number;
     graceSec: number;
     onLog: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
+    onSpawn?: (meta: { pid: number; processGroupId: number | null; startedAt: string }) => Promise<void>;
   },
 ): Promise<RunProcessResult> {
   return _runChildProcess(runId, command, args, {

@@ -1,223 +1,128 @@
 import { describe, expect, it } from "vitest";
 import {
-  createRoutineSchema,
-  createRoutineTriggerSchema,
+  routineRevisionSnapshotV1Schema,
   routineVariableSchema,
-  runRoutineSchema,
   updateRoutineSchema,
-  updateRoutineTriggerSchema,
 } from "./routine.js";
 
-describe("routineVariableSchema", () => {
-  const validTextVar = { name: "myVar", type: "text" as const };
-  const validSelectVar = { name: "env", type: "select" as const, options: ["dev", "prod"] };
+const routineId = "11111111-1111-4111-8111-111111111111";
+const companyId = "22222222-2222-4222-8222-222222222222";
+const triggerId = "33333333-3333-4333-8333-333333333333";
+const baseRevisionId = "44444444-4444-4444-8444-444444444444";
 
-  it("accepts a minimal text variable", () => {
-    expect(routineVariableSchema.safeParse(validTextVar).success).toBe(true);
-  });
-
-  it("accepts a full text variable with defaults", () => {
-    const result = routineVariableSchema.safeParse({
-      name: "count",
-      label: "Count",
-      type: "text",
-      defaultValue: "42",
-      required: false,
+describe("routine validators", () => {
+  it.each(["bearer", "app_webhook", "fireflies_hmac"])("accepts versioned routine revision snapshots with %s trigger metadata", (signingMode) => {
+    const parsed = routineRevisionSnapshotV1Schema.parse({
+      version: 1,
+      routine: {
+        id: routineId,
+        companyId,
+        projectId: null,
+        goalId: null,
+        parentIssueId: null,
+        title: "Daily triage",
+        description: null,
+        assigneeAgentId: null,
+        priority: "medium",
+        status: "active",
+        concurrencyPolicy: "coalesce_if_active",
+        catchUpPolicy: "skip_missed",
+        variables: [],
+      },
+      triggers: [{
+        id: triggerId,
+        kind: "webhook",
+        label: "Inbound",
+        enabled: true,
+        cronExpression: null,
+        timezone: null,
+        publicId: "routine_webhook_123",
+        signingMode,
+        replayWindowSec: 300,
+      }],
     });
-    expect(result.success).toBe(true);
+
+    expect(parsed.triggers[0]?.publicId).toBe("routine_webhook_123");
+    expect(parsed.routine.activityGatePolicy).toBe("always");
+    expect(parsed.routine.activityGateScope).toBe("company");
   });
 
-  it("accepts a valid select variable with options", () => {
-    expect(routineVariableSchema.safeParse(validSelectVar).success).toBe(true);
+  it("rejects secret-bearing trigger fields in routine revision snapshots", () => {
+    expect(() => routineRevisionSnapshotV1Schema.parse({
+      version: 1,
+      routine: {
+        id: routineId,
+        companyId,
+        projectId: null,
+        goalId: null,
+        parentIssueId: null,
+        title: "Daily triage",
+        description: null,
+        assigneeAgentId: null,
+        priority: "medium",
+        status: "active",
+        concurrencyPolicy: "coalesce_if_active",
+        catchUpPolicy: "skip_missed",
+        variables: [],
+      },
+      triggers: [{
+        id: triggerId,
+        kind: "webhook",
+        label: "Inbound",
+        enabled: true,
+        cronExpression: null,
+        timezone: null,
+        publicId: "routine_webhook_123",
+        signingMode: "bearer",
+        replayWindowSec: 300,
+        secretId: "55555555-5555-4555-8555-555555555555",
+      }],
+    })).toThrow();
   });
 
-  it("rejects a select variable with no options", () => {
-    const result = routineVariableSchema.safeParse({ name: "env", type: "select", options: [] });
-    expect(result.success).toBe(false);
+  it("accepts optional base revision ids on routine updates", () => {
+    expect(updateRoutineSchema.parse({
+      title: "Daily triage",
+      baseRevisionId,
+    }).baseRevisionId).toBe(baseRevisionId);
   });
 
-  it("rejects a non-select variable that defines options", () => {
-    const result = routineVariableSchema.safeParse({
-      name: "count",
-      type: "text",
-      options: ["a", "b"],
+  it("validates routine activity gate values", () => {
+    expect(updateRoutineSchema.parse({
+      activityGatePolicy: "require_external_activity",
+      activityGateScope: "project",
+    })).toMatchObject({
+      activityGatePolicy: "require_external_activity",
+      activityGateScope: "project",
     });
-    expect(result.success).toBe(false);
+
+    expect(() => updateRoutineSchema.parse({ activityGatePolicy: "when_busy" })).toThrow();
+    expect(() => updateRoutineSchema.parse({ activityGateScope: "agent" })).toThrow();
   });
 
-  it("rejects a select variable with a default that is not in options", () => {
-    const result = routineVariableSchema.safeParse({
-      name: "env",
-      type: "select",
-      options: ["dev", "prod"],
-      defaultValue: "staging",
+  it("accepts date variables with valid YYYY-MM-DD defaults", () => {
+    expect(routineVariableSchema.parse({
+      name: "startDate",
+      type: "date",
+      defaultValue: "2024-02-29",
+    })).toMatchObject({
+      name: "startDate",
+      type: "date",
+      defaultValue: "2024-02-29",
     });
-    expect(result.success).toBe(false);
   });
 
-  it("accepts a select variable with a valid default", () => {
-    const result = routineVariableSchema.safeParse({
-      name: "env",
-      type: "select",
-      options: ["dev", "prod"],
-      defaultValue: "dev",
-    });
-    expect(result.success).toBe(true);
-  });
+  it("rejects date variables with non-calendar or non-string defaults", () => {
+    expect(() => routineVariableSchema.parse({
+      name: "startDate",
+      type: "date",
+      defaultValue: "2024-02-30",
+    })).toThrow(/YYYY-MM-DD/);
 
-  it("rejects names that do not start with a letter", () => {
-    expect(routineVariableSchema.safeParse({ name: "123bad", type: "text" }).success).toBe(false);
-    expect(routineVariableSchema.safeParse({ name: "_bad", type: "text" }).success).toBe(false);
-  });
-
-  it("accepts names with alphanumeric characters and underscores", () => {
-    expect(routineVariableSchema.safeParse({ name: "myVar_2", type: "text" }).success).toBe(true);
-  });
-});
-
-describe("createRoutineSchema", () => {
-  const minimal = { title: "My Routine" };
-
-  it("accepts a minimal routine (title only)", () => {
-    expect(createRoutineSchema.safeParse(minimal).success).toBe(true);
-  });
-
-  it("rejects an empty title", () => {
-    expect(createRoutineSchema.safeParse({ title: "" }).success).toBe(false);
-  });
-
-  it("rejects a title over 200 chars", () => {
-    expect(
-      createRoutineSchema.safeParse({ title: "a".repeat(201) }).success,
-    ).toBe(false);
-  });
-
-  it("accepts valid priority values", () => {
-    for (const priority of ["low", "medium", "high", "critical"]) {
-      expect(
-        createRoutineSchema.safeParse({ title: "T", priority }).success,
-      ).toBe(true);
-    }
-  });
-
-  it("rejects an invalid priority", () => {
-    expect(createRoutineSchema.safeParse({ title: "T", priority: "urgent" }).success).toBe(false);
-  });
-
-  it("defaults priority to medium", () => {
-    const result = createRoutineSchema.safeParse(minimal);
-    expect(result.success && result.data.priority).toBe("medium");
-  });
-
-  it("defaults concurrencyPolicy to coalesce_if_active", () => {
-    const result = createRoutineSchema.safeParse(minimal);
-    expect(result.success && result.data.concurrencyPolicy).toBe("coalesce_if_active");
-  });
-
-  it("accepts valid concurrencyPolicy values", () => {
-    for (const policy of ["coalesce_if_active", "always_enqueue", "skip_if_active"]) {
-      expect(
-        createRoutineSchema.safeParse({ title: "T", concurrencyPolicy: policy }).success,
-      ).toBe(true);
-    }
-  });
-});
-
-describe("updateRoutineSchema", () => {
-  it("accepts an empty object (all fields optional)", () => {
-    expect(updateRoutineSchema.safeParse({}).success).toBe(true);
-  });
-
-  it("accepts a partial update", () => {
-    expect(updateRoutineSchema.safeParse({ title: "New Title", priority: "high" }).success).toBe(true);
-  });
-});
-
-describe("createRoutineTriggerSchema", () => {
-  it("accepts a valid schedule trigger", () => {
-    const result = createRoutineTriggerSchema.safeParse({
-      kind: "schedule",
-      cronExpression: "0 * * * *",
-      timezone: "UTC",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a schedule trigger with missing cronExpression", () => {
-    const result = createRoutineTriggerSchema.safeParse({
-      kind: "schedule",
-      timezone: "UTC",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts a valid webhook trigger", () => {
-    const result = createRoutineTriggerSchema.safeParse({
-      kind: "webhook",
-      signingMode: "bearer",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a webhook trigger with invalid signingMode", () => {
-    const result = createRoutineTriggerSchema.safeParse({
-      kind: "webhook",
-      signingMode: "invalid",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("defaults webhook replayWindowSec to 300", () => {
-    const result = createRoutineTriggerSchema.safeParse({ kind: "webhook" });
-    expect(result.success && (result.data as any).replayWindowSec).toBe(300);
-  });
-
-  it("accepts an api trigger with no extra fields", () => {
-    expect(createRoutineTriggerSchema.safeParse({ kind: "api" }).success).toBe(true);
-  });
-
-  it("rejects an unknown trigger kind", () => {
-    expect(createRoutineTriggerSchema.safeParse({ kind: "cron" }).success).toBe(false);
-  });
-});
-
-describe("updateRoutineTriggerSchema", () => {
-  it("accepts an empty object", () => {
-    expect(updateRoutineTriggerSchema.safeParse({}).success).toBe(true);
-  });
-
-  it("rejects an out-of-range replayWindowSec", () => {
-    expect(updateRoutineTriggerSchema.safeParse({ replayWindowSec: 10 }).success).toBe(false);
-    expect(updateRoutineTriggerSchema.safeParse({ replayWindowSec: 100_000 }).success).toBe(false);
-  });
-});
-
-describe("runRoutineSchema", () => {
-  it("accepts an empty object (all fields optional)", () => {
-    expect(runRoutineSchema.safeParse({}).success).toBe(true);
-  });
-
-  it("defaults source to manual", () => {
-    const result = runRoutineSchema.safeParse({});
-    expect(result.success && result.data.source).toBe("manual");
-  });
-
-  it("accepts source api", () => {
-    expect(runRoutineSchema.safeParse({ source: "api" }).success).toBe(true);
-  });
-
-  it("rejects an invalid source", () => {
-    expect(runRoutineSchema.safeParse({ source: "webhook" }).success).toBe(false);
-  });
-
-  it("accepts triggerId as uuid", () => {
-    const result = runRoutineSchema.safeParse({
-      triggerId: "00000000-0000-0000-0000-000000000001",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a non-uuid triggerId", () => {
-    expect(runRoutineSchema.safeParse({ triggerId: "not-a-uuid" }).success).toBe(false);
+    expect(() => routineVariableSchema.parse({
+      name: "startDate",
+      type: "date",
+      defaultValue: 20240229,
+    })).toThrow(/YYYY-MM-DD/);
   });
 });

@@ -17,9 +17,41 @@ const mockProjectService = vi.hoisted(() => ({
 const mockSecretService = vi.hoisted(() => ({
   normalizeEnvBindingsForPersistence: vi.fn(),
 }));
+const mockEnvironmentService = vi.hoisted(() => ({
+  getById: vi.fn(),
+}));
 const mockWorkspaceOperationService = vi.hoisted(() => ({}));
 const mockLogActivity = vi.hoisted(() => vi.fn());
 const mockGetTelemetryClient = vi.hoisted(() => vi.fn());
+const mockAccessService = vi.hoisted(() => ({
+  decide: vi.fn(),
+}));
+
+vi.mock("../telemetry.js", () => ({
+  getTelemetryClient: mockGetTelemetryClient,
+}));
+
+vi.mock("../services/index.js", () => ({
+  accessService: () => mockAccessService,
+  environmentService: () => mockEnvironmentService,
+  logActivity: mockLogActivity,
+  projectService: () => mockProjectService,
+  secretService: () => mockSecretService,
+  workspaceOperationService: () => mockWorkspaceOperationService,
+}));
+
+vi.mock("../services/environments.js", () => ({
+  environmentService: () => mockEnvironmentService,
+}));
+
+vi.mock("../services/secrets.js", () => ({
+  secretService: () => mockSecretService,
+}));
+
+vi.mock("../services/workspace-runtime.js", () => ({
+  startRuntimeServicesForWorkspaceControl: vi.fn(),
+  stopRuntimeServicesForProjectWorkspace: vi.fn(),
+}));
 
 vi.mock("../telemetry.js", () => ({
   getTelemetryClient: mockGetTelemetryClient,
@@ -38,16 +70,30 @@ vi.mock("../services/workspace-runtime.js", () => ({
 }));
 
 function registerModuleMocks() {
+  vi.doMock("../services/activity-log.js", async () => ({
+    ...await vi.importActual<typeof import("../services/activity-log.js")>("../services/activity-log.js"),
+    persistActivity: async (db: unknown, input: unknown) => { await mockLogActivity(db, input); return { activity: { id: "activity" }, publication: null }; },
+    publishActivity: vi.fn(),
+  }));
   vi.doMock("../telemetry.js", () => ({
     getTelemetryClient: mockGetTelemetryClient,
   }));
 
   vi.doMock("../services/index.js", () => ({
-    agentPoliciesService: vi.fn(() => ({})),
+    accessService: () => mockAccessService,
+    environmentService: () => mockEnvironmentService,
     logActivity: mockLogActivity,
     projectService: () => mockProjectService,
     secretService: () => mockSecretService,
     workspaceOperationService: () => mockWorkspaceOperationService,
+  }));
+
+  vi.doMock("../services/environments.js", () => ({
+    environmentService: () => mockEnvironmentService,
+  }));
+
+  vi.doMock("../services/secrets.js", () => ({
+    secretService: () => mockSecretService,
   }));
 
   vi.doMock("../services/workspace-runtime.js", () => ({
@@ -73,7 +119,7 @@ async function createApp() {
     };
     next();
   });
-  app.use("/api", projectRoutes({} as any));
+  app.use("/api", projectRoutes({ transaction: async (effect: (tx: unknown) => unknown) => effect({}) } as any));
   app.use(errorHandler);
   return app;
 }
@@ -122,12 +168,21 @@ describe("project env routes", () => {
     vi.doUnmock("../routes/projects.js");
     vi.doUnmock("../routes/authz.js");
     vi.doUnmock("../middleware/index.js");
+    vi.doUnmock("../services/environments.js");
+    vi.doUnmock("../services/secrets.js");
     registerModuleMocks();
-    vi.resetAllMocks();
+    vi.clearAllMocks();
+    mockAccessService.decide.mockResolvedValue({
+      allowed: true,
+      action: "project:read",
+      reason: "allow_test",
+      explanation: "Allowed by test mock.",
+    });
     mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
     mockProjectService.resolveByReference.mockResolvedValue({ ambiguous: false, project: null });
     mockProjectService.createWorkspace.mockResolvedValue(null);
     mockProjectService.listWorkspaces.mockResolvedValue([]);
+    mockEnvironmentService.getById.mockReset();
     mockSecretService.normalizeEnvBindingsForPersistence.mockImplementation(async (_companyId, env) => env);
   });
 

@@ -4,84 +4,71 @@ import {
   updateCompanyBrandingSchema,
   updateCompanySchema,
 } from "./company.js";
+import { portabilityCompanyManifestEntrySchema } from "./company-portability.js";
 
-describe("createCompanySchema", () => {
-  it("accepts a minimal company with just a name", () => {
-    expect(createCompanySchema.safeParse({ name: "Acme" }).success).toBe(true);
+describe("company schemas without the retired settings", () => {
+  it("strips brandColor and attachmentMaxBytes from a create payload", () => {
+    const parsed = createCompanySchema.parse({
+      name: "Acme",
+      brandColor: "#123456",
+      attachmentMaxBytes: 25_000_000,
+    });
+
+    expect(parsed).not.toHaveProperty("brandColor");
+    expect(parsed).not.toHaveProperty("attachmentMaxBytes");
+    expect(parsed.name).toBe("Acme");
   });
 
-  it("rejects an empty name", () => {
-    expect(createCompanySchema.safeParse({ name: "" }).success).toBe(false);
+  it("strips brandColor and attachmentMaxBytes from an update payload", () => {
+    const parsed = updateCompanySchema.parse({
+      description: "Updated",
+      brandColor: "#123456",
+      attachmentMaxBytes: 25_000_000,
+    });
+
+    expect(parsed).not.toHaveProperty("brandColor");
+    expect(parsed).not.toHaveProperty("attachmentMaxBytes");
+    expect(parsed.description).toBe("Updated");
   });
 
-  it("defaults budgetMonthlyCents to 0", () => {
-    const result = createCompanySchema.safeParse({ name: "Acme" });
-    expect(result.success && result.data.budgetMonthlyCents).toBe(0);
+  it("rejects brandColor on the strict branding schema", () => {
+    const result = updateCompanyBrandingSchema.safeParse({
+      name: "Acme",
+      brandColor: "#123456",
+    });
+
+    expect(result.success).toBe(false);
   });
 
-  it("accepts optional description", () => {
-    const result = createCompanySchema.safeParse({ name: "Acme", description: "A company" });
+  it("still accepts the remaining branding fields", () => {
+    const result = updateCompanyBrandingSchema.safeParse({
+      name: "Acme",
+      description: null,
+      logoAssetId: "11111111-1111-4111-8111-111111111111",
+    });
+
     expect(result.success).toBe(true);
   });
 
-  it("rejects a negative budget", () => {
-    expect(
-      createCompanySchema.safeParse({ name: "Acme", budgetMonthlyCents: -1 }).success,
-    ).toBe(false);
-  });
-
-  it("rejects a non-integer budget", () => {
-    expect(
-      createCompanySchema.safeParse({ name: "Acme", budgetMonthlyCents: 9.99 }).success,
-    ).toBe(false);
-  });
-});
-
-describe("updateCompanySchema", () => {
-  it("accepts an empty object (all fields optional)", () => {
-    expect(updateCompanySchema.safeParse({}).success).toBe(true);
-  });
-
-  it("accepts a valid brand color", () => {
-    expect(updateCompanySchema.safeParse({ brandColor: "#ff0000" }).success).toBe(true);
-    expect(updateCompanySchema.safeParse({ brandColor: "#AABBCC" }).success).toBe(true);
-  });
-
-  it("rejects an invalid brand color format", () => {
-    expect(updateCompanySchema.safeParse({ brandColor: "red" }).success).toBe(false);
-    expect(updateCompanySchema.safeParse({ brandColor: "#gg0000" }).success).toBe(false);
-    expect(updateCompanySchema.safeParse({ brandColor: "#ff00" }).success).toBe(false);
-  });
-
-  it("accepts null brand color", () => {
-    expect(updateCompanySchema.safeParse({ brandColor: null }).success).toBe(true);
-  });
-});
-
-describe("updateCompanyBrandingSchema", () => {
-  it("accepts a name update", () => {
-    expect(updateCompanyBrandingSchema.safeParse({ name: "New Name" }).success).toBe(true);
-  });
-
-  it("accepts a description update", () => {
-    expect(updateCompanyBrandingSchema.safeParse({ description: "Updated desc" }).success).toBe(true);
-  });
-
-  it("accepts a brand color update", () => {
-    expect(updateCompanyBrandingSchema.safeParse({ brandColor: "#123456" }).success).toBe(true);
-  });
-
-  it("rejects an empty object — at least one field required", () => {
+  it("requires at least one branding field", () => {
     expect(updateCompanyBrandingSchema.safeParse({}).success).toBe(false);
   });
+});
 
-  it("rejects an invalid brand color", () => {
-    expect(updateCompanyBrandingSchema.safeParse({ brandColor: "notacolor" }).success).toBe(false);
-  });
+describe("portability company manifest tolerance", () => {
+  it("accepts a legacy manifest entry carrying the retired keys and ignores them", () => {
+    const parsed = portabilityCompanyManifestEntrySchema.parse({
+      path: "company.md",
+      name: "Acme",
+      description: null,
+      brandColor: "#5c5fff",
+      logoPath: null,
+      attachmentMaxBytes: 25_000_000,
+      requireBoardApprovalForNewAgents: false,
+    });
 
-  it("rejects unknown fields (strict schema)", () => {
-    expect(
-      updateCompanyBrandingSchema.safeParse({ name: "Acme", unknownField: true }).success,
-    ).toBe(false);
+    expect(parsed).not.toHaveProperty("brandColor");
+    expect(parsed).not.toHaveProperty("attachmentMaxBytes");
+    expect(parsed.name).toBe("Acme");
   });
 });

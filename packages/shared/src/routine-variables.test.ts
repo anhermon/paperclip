@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   isBuiltinRoutineVariable,
-  isValidRoutineVariableName,
-  extractRoutineVariableNames,
+  isRoutineDateVariableName,
+  isValidRoutineDateString,
   syncRoutineVariablesWithTemplate,
   stringifyRoutineVariableValue,
   interpolateRoutineTemplate,
@@ -13,17 +13,69 @@ import {
 // isBuiltinRoutineVariable
 // ============================================================================
 
-describe("isBuiltinRoutineVariable", () => {
-  it("returns true for 'date'", () => {
+  it("deduplicates placeholder names across the routine title and description", () => {
+    expect(
+      extractRoutineVariableNames([
+        "Triage {{repo}}",
+        "Review {{repo}} for {{priority}} bugs",
+      ]),
+    ).toEqual(["repo", "priority"]);
+  });
+
+  it("preserves existing metadata when syncing variables from a template", () => {
+    expect(
+      syncRoutineVariablesWithTemplate(["Triage {{repo}}", "Review {{repo}} and {{startDate}}"], [
+        { name: "repo", label: "Repository", type: "text", defaultValue: "paperclip", required: true, options: [] },
+        { name: "startDate", label: "Start", type: "text", defaultValue: "soon", required: false, options: [] },
+      ]),
+    ).toEqual([
+      { name: "repo", label: "Repository", type: "text", defaultValue: "paperclip", required: true, options: [] },
+      { name: "startDate", label: "Start", type: "text", defaultValue: "soon", required: false, options: [] },
+    ]);
+  });
+
+  it("identifies routine date variable names by strict capital-Date suffix", () => {
+    expect(isRoutineDateVariableName("startDate")).toBe(true);
+    expect(isRoutineDateVariableName("endDate")).toBe(true);
+    expect(isRoutineDateVariableName("fooDate")).toBe(true);
+    expect(isRoutineDateVariableName("date")).toBe(false);
+    expect(isRoutineDateVariableName("startdate")).toBe(false);
+    expect(isRoutineDateVariableName("candidate")).toBe(false);
+    expect(isRoutineDateVariableName("Date")).toBe(false);
+  });
+
+  it("defaults newly synced capital-Date variables to date type", () => {
+    expect(
+      syncRoutineVariablesWithTemplate("Compare {{startDate}} to {{endDate}} with {{date}}", []),
+    ).toEqual([
+      { name: "startDate", label: null, type: "date", defaultValue: null, required: true, options: [] },
+      { name: "endDate", label: null, type: "date", defaultValue: null, required: true, options: [] },
+    ]);
+  });
+
+  it("validates YYYY-MM-DD routine date strings as real calendar dates", () => {
+    expect(isValidRoutineDateString("2024-02-29")).toBe(true);
+    expect(isValidRoutineDateString("2024-02-30")).toBe(false);
+    expect(isValidRoutineDateString("2023-02-29")).toBe(false);
+    expect(isValidRoutineDateString("2024-13-01")).toBe(false);
+    expect(isValidRoutineDateString("2024-1-01")).toBe(false);
+  });
+
+  it("interpolates provided variable values into the routine template", () => {
+    expect(
+      interpolateRoutineTemplate("Review {{repo}} for {{priority}}", {
+        repo: "paperclip",
+        priority: "high",
+      }),
+    ).toBe("Review paperclip for high");
+  });
+
+  it("identifies built-in variable names", () => {
     expect(isBuiltinRoutineVariable("date")).toBe(true);
-  });
-
-  it("returns false for unknown variable", () => {
-    expect(isBuiltinRoutineVariable("myVar")).toBe(false);
-  });
-
-  it("BUILTIN_ROUTINE_VARIABLE_NAMES set contains 'date'", () => {
+    expect(isBuiltinRoutineVariable("timestamp")).toBe(true);
+    expect(isBuiltinRoutineVariable("repo")).toBe(false);
     expect(BUILTIN_ROUTINE_VARIABLE_NAMES.has("date")).toBe(true);
+    expect(BUILTIN_ROUTINE_VARIABLE_NAMES.has("timestamp")).toBe(true);
   });
 });
 
@@ -36,177 +88,54 @@ describe("isValidRoutineVariableName", () => {
     expect(isValidRoutineVariableName("myVar")).toBe(true);
   });
 
-  it("returns true for name with underscore", () => {
-    expect(isValidRoutineVariableName("my_var")).toBe(true);
+  it("getBuiltinRoutineVariableValues returns a human-readable timestamp with year, time, and UTC", () => {
+    const values = getBuiltinRoutineVariableValues();
+    const year = String(new Date().getUTCFullYear());
+    expect(values.timestamp).toContain(year);
+    expect(values.timestamp).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)/);
+    expect(values.timestamp).toContain("UTC");
   });
 
-  it("returns true for name with digits after first char", () => {
-    expect(isValidRoutineVariableName("var123")).toBe(true);
+  it("excludes built-in variables from syncRoutineVariablesWithTemplate", () => {
+    const result = syncRoutineVariablesWithTemplate(
+      "Daily report for {{date}} at {{timestamp}} — {{repo}}",
+      [],
+    );
+    expect(result).toEqual([
+      { name: "repo", label: null, type: "text", defaultValue: null, required: true, options: [] },
+    ]);
   });
 
-  it("returns false for name starting with digit", () => {
-    expect(isValidRoutineVariableName("1var")).toBe(false);
+  it("extracts snake_case variable names", () => {
+    expect(extractRoutineVariableNames("Open {{pr_url}} for review")).toEqual(["pr_url"]);
   });
 
-  it("returns false for name with hyphen", () => {
-    expect(isValidRoutineVariableName("my-var")).toBe(false);
+  it("extracts variable names whose underscores were markdown-escaped by a WYSIWYG editor", () => {
+    // MDXEditor / mdast-util-to-markdown defensively escape intraword underscores
+    // when serializing rich-text back to markdown, so `{{pr_url}}` is stored as `{{pr\_url}}`.
+    expect(extractRoutineVariableNames("Open {{pr\\_url}} for review")).toEqual(["pr_url"]);
+    expect(extractRoutineVariableNames("{{pr\\_url\\_v2}}")).toEqual(["pr_url_v2"]);
   });
 
-  it("returns false for empty string", () => {
-    expect(isValidRoutineVariableName("")).toBe(false);
+  it("syncRoutineVariablesWithTemplate handles markdown-escaped underscores", () => {
+    expect(
+      syncRoutineVariablesWithTemplate("Open {{pr\\_url}}", []),
+    ).toEqual([
+      { name: "pr_url", label: null, type: "text", defaultValue: null, required: true, options: [] },
+    ]);
   });
 
-  it("returns false for name with spaces", () => {
-    expect(isValidRoutineVariableName("my var")).toBe(false);
-  });
-});
-
-// ============================================================================
-// extractRoutineVariableNames
-// ============================================================================
-
-describe("extractRoutineVariableNames", () => {
-  it("extracts a single variable", () => {
-    expect(extractRoutineVariableNames("Hello {{ name }}")).toEqual(["name"]);
+  it("interpolates variables that appear with markdown-escaped underscores", () => {
+    expect(
+      interpolateRoutineTemplate("Open {{pr\\_url}}", { pr_url: "https://example.com" }),
+    ).toBe("Open https://example.com");
   });
 
-  it("extracts multiple variables", () => {
-    const result = extractRoutineVariableNames("{{ greeting }}, {{ name }}!");
-    expect(result).toContain("greeting");
-    expect(result).toContain("name");
-    expect(result).toHaveLength(2);
-  });
-
-  it("deduplicates repeated variables", () => {
-    expect(extractRoutineVariableNames("{{ x }} and {{ x }}")).toEqual(["x"]);
-  });
-
-  it("returns empty array for template with no variables", () => {
-    expect(extractRoutineVariableNames("no variables here")).toEqual([]);
-  });
-
-  it("returns empty array for null", () => {
-    expect(extractRoutineVariableNames(null)).toEqual([]);
-  });
-
-  it("returns empty array for undefined", () => {
-    expect(extractRoutineVariableNames(undefined)).toEqual([]);
-  });
-
-  it("handles array of templates", () => {
-    const result = extractRoutineVariableNames(["{{ a }}", "{{ b }}"]);
-    expect(result).toContain("a");
-    expect(result).toContain("b");
-  });
-
-  it("handles whitespace in variable syntax", () => {
-    expect(extractRoutineVariableNames("{{  myVar  }}")).toEqual(["myVar"]);
-  });
-});
-
-// ============================================================================
-// syncRoutineVariablesWithTemplate
-// ============================================================================
-
-describe("syncRoutineVariablesWithTemplate", () => {
-  it("creates default variables for new template variables", () => {
-    const result = syncRoutineVariablesWithTemplate("{{ name }}", null);
-    expect(result).toHaveLength(1);
-    expect(result[0].name).toBe("name");
-    expect(result[0].type).toBe("text");
-    expect(result[0].required).toBe(true);
-  });
-
-  it("preserves existing variable definitions", () => {
-    const existing = [{ name: "name", label: "Your Name", type: "text" as const, defaultValue: "Alice", required: false, options: [] }];
-    const result = syncRoutineVariablesWithTemplate("{{ name }}", existing);
-    expect(result[0].label).toBe("Your Name");
-    expect(result[0].defaultValue).toBe("Alice");
-  });
-
-  it("excludes built-in variables from the result", () => {
-    const result = syncRoutineVariablesWithTemplate("{{ date }} and {{ name }}", null);
-    expect(result.map((v) => v.name)).not.toContain("date");
-    expect(result.map((v) => v.name)).toContain("name");
-  });
-
-  it("returns empty array when template has no custom variables", () => {
-    expect(syncRoutineVariablesWithTemplate("{{ date }}", null)).toHaveLength(0);
-  });
-
-  it("removes variables no longer in template", () => {
-    const existing = [{ name: "oldVar", label: null, type: "text" as const, defaultValue: null, required: true, options: [] }];
-    const result = syncRoutineVariablesWithTemplate("{{ newVar }}", existing);
-    expect(result.map((v) => v.name)).not.toContain("oldVar");
-  });
-});
-
-// ============================================================================
-// stringifyRoutineVariableValue
-// ============================================================================
-
-describe("stringifyRoutineVariableValue", () => {
-  it("returns string as-is", () => {
-    expect(stringifyRoutineVariableValue("hello")).toBe("hello");
-  });
-
-  it("converts number to string", () => {
-    expect(stringifyRoutineVariableValue(42)).toBe("42");
-  });
-
-  it("converts boolean to string", () => {
-    expect(stringifyRoutineVariableValue(true)).toBe("true");
-    expect(stringifyRoutineVariableValue(false)).toBe("false");
-  });
-
-  it("returns empty string for null", () => {
-    expect(stringifyRoutineVariableValue(null)).toBe("");
-  });
-
-  it("returns empty string for undefined", () => {
-    expect(stringifyRoutineVariableValue(undefined)).toBe("");
-  });
-
-  it("JSON-stringifies objects", () => {
-    const result = stringifyRoutineVariableValue({ key: "value" });
-    expect(result).toBe('{"key":"value"}');
-  });
-});
-
-// ============================================================================
-// interpolateRoutineTemplate
-// ============================================================================
-
-describe("interpolateRoutineTemplate", () => {
-  it("returns null for null template", () => {
-    expect(interpolateRoutineTemplate(null, {})).toBeNull();
-  });
-
-  it("returns template unchanged when values is null", () => {
-    expect(interpolateRoutineTemplate("hello {{ name }}", null)).toBe("hello {{ name }}");
-  });
-
-  it("returns template unchanged when values is empty", () => {
-    expect(interpolateRoutineTemplate("hello {{ name }}", {})).toBe("hello {{ name }}");
-  });
-
-  it("substitutes a single variable", () => {
-    expect(interpolateRoutineTemplate("Hello {{ name }}!", { name: "World" })).toBe("Hello World!");
-  });
-
-  it("substitutes multiple variables", () => {
-    const result = interpolateRoutineTemplate("{{ greeting }}, {{ name }}!", {
-      greeting: "Hi",
-      name: "Alice",
-    });
-    expect(result).toBe("Hi, Alice!");
-  });
-
-  it("leaves unmatched variables in place", () => {
-    expect(interpolateRoutineTemplate("{{ unknown }}", { name: "Alice" })).toBe("{{ unknown }}");
-  });
-
-  it("handles numeric values", () => {
-    expect(interpolateRoutineTemplate("Count: {{ n }}", { n: 5 })).toBe("Count: 5");
+  it("interpolates built-in variables alongside user variables", () => {
+    const builtins = getBuiltinRoutineVariableValues();
+    const allVars = { ...builtins, repo: "paperclip" };
+    expect(
+      interpolateRoutineTemplate("Report for {{date}} ({{timestamp}}) on {{repo}}", allVars),
+    ).toBe(`Report for ${builtins.date} (${builtins.timestamp}) on paperclip`);
   });
 });

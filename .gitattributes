@@ -1,2 +1,1 @@
-# Enforce LF line endings for shell scripts to prevent CRLF breakage in Docker
-*.sh text eol=lf
+patches/*.patch whitespace=-space-before-tab
