@@ -17,6 +17,7 @@ Before making changes, read in this order:
 4. `doc/DEVELOPING.md`
 5. `doc/DATABASE.md`
 6. `doc/AGENT-GIT-WORKFLOW.md` — **required for all agents committing to this repo**
+7. `doc/PROCESS.md` — **worktree discipline and PR workflow protocol (ANGA-533)**
 
 `doc/SPEC.md` is long-horizon product context.
 `doc/SPEC-implementation.md` is the concrete V1 build contract.

@@ -11,7 +11,9 @@ SMOKE_DETACH="${SMOKE_DETACH:-false}"
 SMOKE_METADATA_FILE="${SMOKE_METADATA_FILE:-}"
 PAPERCLIP_DEPLOYMENT_MODE="${PAPERCLIP_DEPLOYMENT_MODE:-authenticated}"
 PAPERCLIP_DEPLOYMENT_EXPOSURE="${PAPERCLIP_DEPLOYMENT_EXPOSURE:-private}"
-PAPERCLIP_PUBLIC_URL="${PAPERCLIP_PUBLIC_URL:-http://localhost:${HOST_PORT}}"
+# With --network host the container shares the CI runner's network namespace,
+# so the server's loopback (127.0.0.1:PORT) is reachable directly from the host.
+PAPERCLIP_PUBLIC_URL="${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
 SMOKE_AUTO_BOOTSTRAP="${SMOKE_AUTO_BOOTSTRAP:-true}"
 SMOKE_ADMIN_NAME="${SMOKE_ADMIN_NAME:-Smoke Admin}"
 SMOKE_ADMIN_EMAIL="${SMOKE_ADMIN_EMAIL:-smoke-admin@paperclip.local}"
@@ -30,6 +32,7 @@ cleanup() {
   fi
   if [[ "$PRESERVE_CONTAINER_ON_EXIT" != "true" ]]; then
     docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
   if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
     rm -rf "$TMP_DIR"
@@ -86,6 +89,19 @@ write_metadata_file() {
 generate_bootstrap_invite_url() {
   local bootstrap_output
   local bootstrap_status
+  # bootstrap-ceo reads config.server.deploymentMode from the JSON config file, not from env vars.
+  # When onboard runs with private exposure, it writes deploymentMode=local_trusted to the config
+  # (authenticated+private is treated as local_trusted internally), so bootstrap-ceo skips.
+  # The running server uses PAPERCLIP_DEPLOYMENT_MODE env at runtime and is unaffected by this patch.
+  docker exec "$CONTAINER_NAME" bash -lc '
+    node -e "
+      const fs=require(\"fs\");
+      const p=\"/paperclip/instances/default/config.json\";
+      const c=JSON.parse(fs.readFileSync(p,\"utf8\"));
+      if(c.server)c.server.deploymentMode=\"authenticated\";
+      fs.writeFileSync(p,JSON.stringify(c));
+    "
+  ' 2>/dev/null || true
   if bootstrap_output="$(
     docker exec \
       -e PAPERCLIP_DEPLOYMENT_MODE="$PAPERCLIP_DEPLOYMENT_MODE" \
@@ -93,7 +109,7 @@ generate_bootstrap_invite_url() {
       -e PAPERCLIP_PUBLIC_URL="$PAPERCLIP_PUBLIC_URL" \
       -e PAPERCLIP_HOME="/paperclip" \
       "$CONTAINER_NAME" bash -lc \
-      'timeout 20s npx --yes "paperclipai@${PAPERCLIPAI_VERSION}" auth bootstrap-ceo --data-dir "$PAPERCLIP_HOME" --base-url "$PAPERCLIP_PUBLIC_URL"' \
+      'timeout 20s paperclipai auth bootstrap-ceo --data-dir "$PAPERCLIP_HOME" --base-url "$PAPERCLIP_PUBLIC_URL"' \
       2>&1
   )"; then
     bootstrap_status=0
@@ -115,6 +131,9 @@ generate_bootstrap_invite_url() {
   )"
 
   if [[ -z "$invite_url" ]]; then
+    if printf '%s\n' "$bootstrap_output" | grep -qi "only required for authenticated\|not required\|local_trusted"; then
+      return 0
+    fi
     echo "Smoke bootstrap failed: bootstrap-ceo did not print an invite URL" >&2
     printf '%s\n' "$bootstrap_output" >&2
     return 1
@@ -199,23 +218,26 @@ auto_bootstrap_authenticated_smoke() {
     echo "    Smoke bootstrap: instance already ready"
   else
     local invite_url
-    invite_url="$(generate_bootstrap_invite_url)"
-    echo "    Smoke bootstrap: generated bootstrap invite via auth bootstrap-ceo"
-
-    local invite_token="${invite_url##*/}"
-    local accept_response="$TMP_DIR/accept.json"
-    local accept_status
-    accept_status="$(post_json_with_cookies \
-      "$PAPERCLIP_PUBLIC_URL/api/invites/$invite_token/accept" \
-      '{"requestType":"human"}' \
-      "$accept_response")"
-    if [[ ! "$accept_status" =~ ^2 ]]; then
-      echo "Smoke bootstrap failed: bootstrap invite acceptance returned HTTP $accept_status" >&2
-      cat "$accept_response" >&2 || true
-      echo >&2
-      return 1
+    invite_url="$(generate_bootstrap_invite_url)" || return 1
+    if [[ -n "$invite_url" ]]; then
+      echo "    Smoke bootstrap: generated bootstrap invite via auth bootstrap-ceo"
+      local invite_token="${invite_url##*/}"
+      local accept_response="$TMP_DIR/accept.json"
+      local accept_status
+      accept_status="$(post_json_with_cookies \
+        "$PAPERCLIP_PUBLIC_URL/api/invites/$invite_token/accept" \
+        '{"requestType":"human"}' \
+        "$accept_response")"
+      if [[ ! "$accept_status" =~ ^2 ]]; then
+        echo "Smoke bootstrap failed: bootstrap invite acceptance returned HTTP $accept_status" >&2
+        cat "$accept_response" >&2 || true
+        echo >&2
+        return 1
+      fi
+      echo "    Smoke bootstrap: accepted bootstrap invite"
+    else
+      echo "    Smoke bootstrap: bootstrap not required in this deployment mode"
     fi
-    echo "    Smoke bootstrap: accepted bootstrap invite"
   fi
 
   local session_json
@@ -259,10 +281,9 @@ fi
 
 docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
-docker run -d --rm \
+docker run -d \
   --name "$CONTAINER_NAME" \
-  -p "$HOST_PORT:3100" \
-  -e HOST=0.0.0.0 \
+  --network host \
   -e PORT=3100 \
   -e PAPERCLIP_DEPLOYMENT_MODE="$PAPERCLIP_DEPLOYMENT_MODE" \
   -e PAPERCLIP_DEPLOYMENT_EXPOSURE="$PAPERCLIP_DEPLOYMENT_EXPOSURE" \
@@ -280,6 +301,12 @@ COOKIE_JAR="$TMP_DIR/cookies.txt"
 
 if ! wait_for_http "$PAPERCLIP_PUBLIC_URL/api/health" 90 1; then
   echo "Smoke bootstrap failed: server did not become ready at $PAPERCLIP_PUBLIC_URL/api/health" >&2
+  echo "==> Container logs:" >&2
+  docker logs "$CONTAINER_NAME" >&2 || true
+  if [[ -n "$SMOKE_METADATA_FILE" ]]; then
+    mkdir -p "$(dirname "$SMOKE_METADATA_FILE")"
+    printf 'SMOKE_CONTAINER_NAME=%q\n' "$CONTAINER_NAME" > "$SMOKE_METADATA_FILE"
+  fi
   exit 1
 fi
 
