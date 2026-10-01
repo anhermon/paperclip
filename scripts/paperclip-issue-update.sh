@@ -11,12 +11,16 @@ Reads a multiline markdown comment from stdin when stdin is piped. This preserve
 newlines when building the JSON payload for PATCH /api/issues/{issueId}.
 
 Examples:
-  # Comment-only (does not change status / review state):
-  scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" <<'MD'
-  Investigating formatting
+  # Intentional status + multiline comment. Do not use --status in_progress
+  # just to attach a comment (that can request-changes on in_review). Omitting
+  # --status still PATCHes; board/human comments on done/blocked can move the
+  # issue to todo. Agent note-only updates: POST /api/issues/{id}/comments
+  # (see skills/paperclip/SKILL.md):
+  scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" --status done <<'MD'
+  Done
 
-  - Pulled the raw comment body
-  - Comparing it with the run transcript
+  - Fixed the newline-preserving issue update path
+  - Verified the raw stored comment body keeps paragraph breaks
   MD
 
   scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" --status done --dry-run <<'MD'

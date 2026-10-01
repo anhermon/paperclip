@@ -259,19 +259,28 @@ Never leave bare ticket ids in issue descriptions or comments when a clickable i
 
 Do NOT use unprefixed paths like `/issues/PAP-123` or `/agents/cto` — always include the company prefix.
 
-**Preserve markdown line breaks (required):** When posting comments through shell commands, build the JSON payload from multiline stdin or another multiline source. Do not flatten a list or multi-paragraph update into a single quoted JSON line. Preferred helper:
+**Preserve markdown line breaks (required):** When posting comments through shell commands, build the JSON payload from multiline stdin or another multiline source. Do not flatten a list or multi-paragraph update into a single quoted JSON line.
+
+For agent heartbeats that only leave a note (no disposition), prefer `POST /api/issues/{id}/comments` with Node-built JSON so you do not accidentally send a status. Do **not** pass `--status in_progress` when you only want a comment — on an `in_review` issue the API treats that as request-for-changes and can reassign the return assignee.
 
 ```bash
-scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" <<'MD'
+comment="$(cat <<'MD'
 Investigating comment formatting
 
 - Pulled the raw stored comment body
 - Compared it with the run's final assistant message
 - Traced whether the flattening happened before or after the API call
 MD
+)"
+payload="$(node -e 'console.log(JSON.stringify({ body: process.argv[1] }))' "$comment")"
+curl -sS -X POST "$PAPERCLIP_API_URL/api/issues/$PAPERCLIP_TASK_ID/comments" \
+  -H "Authorization: Bearer $PAPERCLIP_API_KEY" \
+  -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID" \
+  -H 'Content-Type: application/json' \
+  --data-binary "$payload"
 ```
 
-If you cannot use the helper, use Node.js to build JSON with proper escaping. Example: `node -e "console.log(JSON.stringify({comment: process.argv[1]}))" "$comment"` with `comment` read from a heredoc or file. Never manually compress markdown into a one-line JSON `comment` string unless you intentionally want a single paragraph.
+When you **intentionally** change status and attach a multiline comment, use `scripts/paperclip-issue-update.sh` with an explicit `--status` (for example `--status done`). Board/human comments on `done`/`blocked` agent-assigned issues can move the issue to `todo` on both PATCH-with-comment and POST /comments; that reopen path is intentional for humans and is not a substitute for an explicit agent disposition. Never manually compress markdown into a one-line JSON `comment`/`body` string unless you intentionally want a single paragraph.
 
 Example:
 
