@@ -166,33 +166,57 @@ while :; do
     exit 1
   fi
 
-  # Comments on PATCH /issues/{id} are not request-idempotent. If the first
-  # attempt may already have landed (lost response / timeout), do not send the
-  # same comment again. When a status was requested, probe GET once; if the
-  # server already shows that status, treat the write as success.
-  if [[ -n "$comment" ]]; then
-    if [[ -n "$status" ]]; then
-      set +e
-      probe="$(
-        curl -sS -m 30 -X GET           "$PAPERCLIP_API_URL/api/issues/$issue_id"           -H "Authorization: Bearer $PAPERCLIP_API_KEY"           -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID"           -w '\n%{http_code}'
-      )"
-      probe_exit=$?
-      set -e
-      if [[ "$probe_exit" -eq 0 ]]; then
-        probe_code="${probe##*$'\n'}"
-        probe_body="${probe%$'\n'*}"
-        if [[ "$probe_code" == 2* && -n "$probe_body" ]]; then
-          probe_status="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(v && v.status != null ? String(v.status) : "")' "$probe_body" 2>/dev/null || true)"
-          if [[ "$probe_status" == "$status" ]]; then
-            printf '%s\n' "$probe_body"
-            exit 0
+  # Ambiguous transport failure with a comment: the PATCH may already have
+  # landed and a blind retry would duplicate it. Probe comments before
+  # re-sending. HTTP 5xx still retries (server rejected/did not commit).
+  if [[ -n "$comment" && "$curl_exit" -ne 0 ]]; then
+    set +e
+    comments_resp="$(
+      curl -sS -m 30 -X GET         "$PAPERCLIP_API_URL/api/issues/$issue_id/comments?order=desc"         -H "Authorization: Bearer $PAPERCLIP_API_KEY"         -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID"         -w '\n%{http_code}'
+    )"
+    comments_exit=$?
+    set -e
+    if [[ "$comments_exit" -eq 0 ]]; then
+      comments_code="${comments_resp##*$'\n'}"
+      comments_body="${comments_resp%$'\n'*}"
+      if [[ "$comments_code" == 2* && -n "$comments_body" ]]; then
+        comment_found="$(
+          node -e '
+            const wanted = process.argv[1];
+            let rows = [];
+            try { rows = JSON.parse(process.argv[2]); } catch {}
+            if (!Array.isArray(rows) && rows && Array.isArray(rows.comments)) rows = rows.comments;
+            if (!Array.isArray(rows)) rows = [];
+            const hit = rows.some((row) => row && row.body === wanted);
+            process.stdout.write(hit ? "yes" : "no");
+          ' "$comment" "$comments_body" 2>/dev/null || true
+        )"
+        if [[ "$comment_found" == "yes" ]]; then
+          set +e
+          issue_resp="$(
+            curl -sS -m 30 -X GET               "$PAPERCLIP_API_URL/api/issues/$issue_id"               -H "Authorization: Bearer $PAPERCLIP_API_KEY"               -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID"               -w '\n%{http_code}'
+          )"
+          issue_exit=$?
+          set -e
+          if [[ "$issue_exit" -eq 0 ]]; then
+            issue_code="${issue_resp##*$'\n'}"
+            issue_body="${issue_resp%$'\n'*}"
+            if [[ "$issue_code" == 2* && -n "$issue_body" ]]; then
+              if [[ -n "$status" ]]; then
+                issue_status="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(v && v.status != null ? String(v.status) : "")' "$issue_body" 2>/dev/null || true)"
+                if [[ "$issue_status" != "$status" ]]; then
+                  printf 'Issue update FAILED: comment was saved but status is %s instead of requested %s.\n' "${issue_status:-<none>}" "$status" >&2
+                  printf '%s\n' "$issue_body" >&2
+                  exit 1
+                fi
+              fi
+              printf '%s\n' "$issue_body"
+              exit 0
+            fi
           fi
         fi
       fi
     fi
-    printf 'Issue update FAILED (curl exit %s, HTTP %s) with a comment payload. Not retrying — a second PATCH can duplicate the comment if the first write already landed. Verify the issue before posting again.\n' "$curl_exit" "${http_code:-000}" >&2
-    [[ -n "$body" ]] && printf '%s\n' "$body" >&2
-    exit 1
   fi
 
   printf 'Issue update attempt %d/%d failed (curl exit %s, HTTP %s); retrying...\n' "$attempt" "$max_attempts" "$curl_exit" "${http_code:-000}" >&2
