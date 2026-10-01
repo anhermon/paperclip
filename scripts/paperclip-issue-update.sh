@@ -183,13 +183,17 @@ while :; do
         comment_found="$(
           node -e '
             const wanted = process.argv[1];
+            const runId = process.argv[2];
             let rows = [];
-            try { rows = JSON.parse(process.argv[2]); } catch {}
+            try { rows = JSON.parse(process.argv[3]); } catch {}
             if (!Array.isArray(rows) && rows && Array.isArray(rows.comments)) rows = rows.comments;
             if (!Array.isArray(rows)) rows = [];
-            const hit = rows.some((row) => row && row.body === wanted);
+            // Require this run id — identical older bodies must not confirm an unsaved update.
+            const hit = rows.some((row) => row && row.body === wanted && (
+              row.createdByRunId === runId || row.derivedCreatedByRunId === runId
+            ));
             process.stdout.write(hit ? "yes" : "no");
-          ' "$comment" "$comments_body" 2>/dev/null || true
+          ' "$comment" "$PAPERCLIP_RUN_ID" "$comments_body" 2>/dev/null || true
         )"
         if [[ "$comment_found" == "yes" ]]; then
           set +e
