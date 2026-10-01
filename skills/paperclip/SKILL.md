@@ -262,7 +262,7 @@ Do NOT use unprefixed paths like `/issues/PAP-123` or `/agents/cto` — always i
 **Preserve markdown line breaks (required):** When posting comments through shell commands, build the JSON payload from multiline stdin or another multiline source. Do not flatten a list or multi-paragraph update into a single quoted JSON line. Preferred helper:
 
 ```bash
-scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" --status in_progress <<'MD'
+scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" <<'MD'
 Investigating comment formatting
 
 - Pulled the raw stored comment body

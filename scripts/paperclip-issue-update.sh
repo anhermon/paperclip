@@ -11,7 +11,8 @@ Reads a multiline markdown comment from stdin when stdin is piped. This preserve
 newlines when building the JSON payload for PATCH /api/issues/{issueId}.
 
 Examples:
-  scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" --status in_progress <<'MD'
+  # Comment-only (does not change status / review state):
+  scripts/paperclip-issue-update.sh --issue-id "$PAPERCLIP_TASK_ID" <<'MD'
   Investigating formatting
 
   - Pulled the raw comment body
