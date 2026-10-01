@@ -50,7 +50,7 @@
 // ---------------------------------------------------------------------------
 
 export { definePlugin } from "./define-plugin.js";
-export { createTestHarness } from "./testing.js";
+export { createTestHarness, createEnvironmentTestHarness, createFakeEnvironmentDriver, filterEnvironmentEvents, assertEnvironmentEventOrder, assertLeaseLifecycle, assertWorkspaceRealizationLifecycle, assertExecutionLifecycle, assertEnvironmentError } from "./testing.js";
 export { createPluginBundlerPresets } from "./bundlers.js";
 export { startPluginDevServer, getUiBuildSnapshot } from "./dev-server.js";
 export { startWorkerRpcHost, runWorker } from "./worker-rpc-host.js";
@@ -58,6 +58,7 @@ export {
   createHostClientHandlers,
   getRequiredCapability,
   CapabilityDeniedError,
+  InvocationScopeDeniedError,
 } from "./host-client-factory.js";
 
 // JSON-RPC protocol helpers and constants
@@ -81,6 +82,12 @@ export {
   parseMessage,
   JsonRpcParseError,
   JsonRpcCallError,
+  LOGIN_PTY_OUTPUT_NOTIFICATION,
+  LOGIN_PTY_EXIT_NOTIFICATION,
+  DUPLEX_CHANNEL_DATA_NOTIFICATION,
+  DUPLEX_CHANNEL_EXIT_NOTIFICATION,
+  encodeChannelBytes,
+  decodeChannelBytes,
   _resetIdCounter,
 } from "./protocol.js";
 
@@ -93,6 +100,7 @@ export type {
   PluginDefinition,
   PaperclipPlugin,
   PluginHealthDiagnostics,
+  PluginConfigChangeContext,
   PluginConfigValidationResult,
   PluginWebhookInput,
   PluginApiRequestInput,
@@ -102,6 +110,10 @@ export type {
   TestHarness,
   TestHarnessOptions,
   TestHarnessLogEntry,
+  EnvironmentTestHarness,
+  EnvironmentTestHarnessOptions,
+  EnvironmentEventRecord,
+  FakeEnvironmentDriverOptions,
 } from "./testing.js";
 export type {
   PluginBundlerPresetInput,
@@ -124,6 +136,8 @@ export type {
 // JSON-RPC protocol types
 export type {
   JsonRpcId,
+  JsonRpcInvocationScope,
+  JsonRpcInvocationContext,
   JsonRpcRequest,
   JsonRpcSuccessResponse,
   JsonRpcError,
@@ -133,6 +147,9 @@ export type {
   JsonRpcMessage,
   JsonRpcErrorCode,
   PluginRpcErrorCode,
+  PluginInvocationScope,
+  PluginInvocationContext,
+  WorkerHostCallContext,
   InitializeParams,
   InitializeResult,
   ConfigChangedParams,
@@ -141,7 +158,59 @@ export type {
   RunJobParams,
   GetDataParams,
   PerformActionParams,
+  PluginPerformActionActorType,
+  PluginPerformActionActorContext,
+  PluginPerformActionContext,
   ExecuteToolParams,
+  PluginExternalObjectUrlCandidate,
+  PluginExternalObjectSourceContext,
+  DetectExternalObjectsParams,
+  PluginExternalObjectDetection,
+  DetectExternalObjectsResult,
+  PluginExternalObjectRecordSnapshot,
+  ResolveExternalObjectParams,
+  PluginExternalObjectResolvedSnapshot,
+  PluginExternalObjectResolveResult,
+  RefreshExternalObjectsParams,
+  RefreshExternalObjectsResult,
+  PluginEnvironmentDiagnostic,
+  PluginEnvironmentDriverBaseParams,
+  PluginEnvironmentValidateConfigParams,
+  PluginEnvironmentValidationResult,
+  PluginEnvironmentProbeParams,
+  PluginEnvironmentProbeResult,
+  PluginEnvironmentLease,
+  PluginEnvironmentAcquireLeaseParams,
+  PluginEnvironmentResumeLeaseParams,
+  PluginEnvironmentReleaseLeaseParams,
+  PluginEnvironmentTerminationReceipt,
+  PluginEnvironmentDestroyLeaseParams,
+  PluginEnvironmentRealizeWorkspaceParams,
+  PluginEnvironmentRealizeWorkspaceResult,
+  PluginEnvironmentExecuteParams,
+  PluginEnvironmentExecuteResult,
+  PluginEnvironmentRunnerIngressEndpointParams,
+  PluginEnvironmentRunnerIngressEndpoint,
+  PluginSyncFileMapping,
+  PluginPostUploadCommand,
+  PluginSyncOperation,
+  PluginEnvironmentSyncInParams,
+  PluginEnvironmentSyncOutParams,
+  PluginEnvironmentSyncResult,
+  PluginEnvironmentInteractiveSetupStatus,
+  PluginEnvironmentInteractiveSetupConnectionType,
+  PluginEnvironmentTemplateRefKind,
+  PluginEnvironmentInteractiveSetupConnectionSummary,
+  PluginEnvironmentInteractiveSetupConnectionPayload,
+  PluginEnvironmentInteractiveSetupSession,
+  PluginEnvironmentStartInteractiveSetupParams,
+  PluginEnvironmentGetInteractiveSetupParams,
+  PluginEnvironmentCaptureTemplateParams,
+  PluginEnvironmentCaptureTemplateResult,
+  PluginEnvironmentCancelInteractiveSetupParams,
+  PluginEnvironmentCancelInteractiveSetupResult,
+  PluginEnvironmentDeleteTemplateParams,
+  PluginEnvironmentDeleteTemplateResult,
   PluginModalBoundsRequest,
   PluginRenderCloseEvent,
   PluginLauncherRenderContextSnapshot,
@@ -161,6 +230,13 @@ export type {
 export type {
   PluginContext,
   PluginConfigClient,
+  PluginLocalFolderProblem,
+  PluginLocalFolderStatus,
+  PluginLocalFolderConfigureInput,
+  PluginLocalFolderListOptions,
+  PluginLocalFolderEntry,
+  PluginLocalFolderListing,
+  PluginLocalFoldersClient,
   PluginEventsClient,
   PluginJobsClient,
   PluginLaunchersClient,
@@ -171,6 +247,8 @@ export type {
   PluginStateClient,
   PluginEntitiesClient,
   PluginProjectsClient,
+  PluginExecutionWorkspacesClient,
+  PluginSkillsClient,
   PluginCompaniesClient,
   PluginIssuesClient,
   PluginIssueMutationActor,
@@ -190,6 +268,17 @@ export type {
   PluginIssueSubtree,
   PluginIssueSummariesClient,
   PluginAgentsClient,
+  PluginAccessClient,
+  PluginAccessMembersClient,
+  PluginAccessInvitesClient,
+  PluginAccessMember,
+  PluginAccessInvite,
+  PluginAuthorizationClient,
+  PluginAuthorizationPolicySummary,
+  PluginAuthorizationPolicyRecord,
+  PluginAssignmentPreviewInput,
+  PluginAuthorizationDecisionResult,
+  PluginAuthorizationAuditEntry,
   PluginAgentSessionsClient,
   AgentSession,
   AgentSessionEvent,
@@ -202,7 +291,12 @@ export type {
   PluginMetricsClient,
   PluginTelemetryClient,
   PluginLogger,
+  PluginTracer,
+  PluginSpan,
 } from "./types.js";
+
+// Tracer no-op default (a value, so it re-exports here, not in the type block).
+export { NOOP_PLUGIN_TRACER, NOOP_PLUGIN_SPAN } from "./types.js";
 
 // Supporting types for context clients
 export type {
@@ -217,6 +311,7 @@ export type {
   PluginEntityRecord,
   PluginEntityQuery,
   PluginWorkspace,
+  PluginExecutionWorkspaceMetadata,
   Company,
   Project,
   Issue,
@@ -224,7 +319,13 @@ export type {
   IssueDocumentSummary,
   Agent,
   Goal,
+  PermissionKey,
+  PrincipalPermissionGrant,
+  PrincipalType,
   PluginDatabaseClient,
+  HumanCompanyMembershipRole,
+  MembershipStatus,
+  EnvSecretRefBinding,
 } from "./types.js";
 
 // Manifest and constant types re-exported from @paperclipai/shared
@@ -235,6 +336,20 @@ export type {
   PluginJobDeclaration,
   PluginWebhookDeclaration,
   PluginToolDeclaration,
+  PluginEnvironmentDriverDeclaration,
+  PluginEnvironmentTemplateConfigBinding,
+  PluginManagedAgentDeclaration,
+  PluginManagedAgentResolution,
+  PluginManagedProjectDeclaration,
+  PluginManagedProjectResolution,
+  PluginManagedRoutineDeclaration,
+  PluginManagedRoutineResolution,
+  PluginManagedSkillDeclaration,
+  PluginManagedSkillFileDeclaration,
+  PluginManagedSkillResolution,
+  CompanySkill,
+  PluginManagedResourceKind,
+  PluginManagedResourceRef,
   PluginUiSlotDeclaration,
   PluginUiDeclaration,
   PluginLauncherActionDeclaration,
@@ -244,6 +359,10 @@ export type {
   PluginDatabaseDeclaration,
   PluginApiRouteCompanyResolution,
   PluginApiRouteDeclaration,
+  PluginLocalFolderDeclaration,
+  PluginCompanySettings,
+  PluginObjectReferenceRefreshPolicy,
+  PluginObjectReferenceProviderDeclaration,
   PluginRecord,
   PluginDatabaseNamespaceRecord,
   PluginMigrationRecord,
@@ -272,6 +391,12 @@ export type {
   PluginApiRouteMethod,
   PluginEventType,
   PluginBridgeErrorCode,
+  ConnectionIntentInteraction,
+  ConnectionIntentPayload,
+  ConnectionIntentResult,
+  ConnectionIntentSetupOptions,
+  ConnectionRequestResult,
+  ConnectionsSearchResult,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -309,6 +434,7 @@ export {
   PLUGIN_CAPABILITIES,
   PLUGIN_UI_SLOT_TYPES,
   PLUGIN_UI_SLOT_ENTITY_TYPES,
+  PLUGIN_RESERVED_COMPANY_SETTINGS_ROUTE_SEGMENTS,
   PLUGIN_STATE_SCOPE_KINDS,
   PLUGIN_JOB_STATUSES,
   PLUGIN_JOB_RUN_STATUSES,
@@ -316,4 +442,12 @@ export {
   PLUGIN_WEBHOOK_DELIVERY_STATUSES,
   PLUGIN_EVENT_TYPES,
   PLUGIN_BRIDGE_ERROR_CODES,
+  PERMISSION_KEYS,
+  HUMAN_COMPANY_MEMBERSHIP_ROLES,
+  HUMAN_COMPANY_MEMBERSHIP_ROLE_LABELS,
+  MEMBERSHIP_STATUSES,
+  PRINCIPAL_TYPES,
 } from "@paperclipai/shared";
+
+export { PluginEnvironmentCreationCleanupError, environmentCreationCleanupErrorData, readEnvironmentCreationCleanupError } from "./environment-creation-cleanup.js";
+export type { PluginEnvironmentCreationCleanup } from "./environment-creation-cleanup.js";

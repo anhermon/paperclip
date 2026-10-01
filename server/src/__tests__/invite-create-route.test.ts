@@ -64,7 +64,6 @@ function createDbStub() {
             where() {
               return Promise.resolve([{
                 name: "Acme Robotics",
-                brandColor: "#114488",
                 logoAssetId: "logo-1",
               }]);
             },
@@ -113,7 +112,7 @@ describe("POST /companies/:companyId/invites", () => {
     vi.doUnmock("../routes/authz.js");
     vi.doUnmock("../middleware/index.js");
     registerModuleMocks();
-    vi.resetAllMocks();
+    vi.clearAllMocks();
     logActivityMock.mockReset();
   });
 

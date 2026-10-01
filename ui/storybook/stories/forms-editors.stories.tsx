@@ -2,8 +2,9 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { Agent, CompanySecret, EnvBinding, Project, RoutineVariable } from "@paperclipai/shared";
 import { Code2, FileText, ListPlus, RotateCcw, Table2 } from "lucide-react";
-import { EnvVarEditor } from "@/components/EnvVarEditor";
+import { EnvironmentVariablesEditor } from "@/components/environment-variables-editor";
 import { ExecutionParticipantPicker } from "@/components/ExecutionParticipantPicker";
+import { FoldCurtain } from "@/components/FoldCurtain";
 import { InlineEditor } from "@/components/InlineEditor";
 import { InlineEntitySelector, type InlineEntityOption } from "@/components/InlineEntitySelector";
 import { JsonSchemaForm, type JsonSchemaNode, getDefaultValues } from "@/components/JsonSchemaForm";
@@ -91,6 +92,8 @@ Ship criteria for the board UI refresh:
 - [x] Keep comments and task updates auditable
 - [ ] Attach screenshots after QA
 
+Tooling: lean on [/react-perf-optimizer](skill://skill-react-perf?s=react-perf-optimizer) and [/vercel-react-best-practices](skill://skill-vercel-react?s=vercel-react-best-practices) so we don't regress render performance on the page it's open to. Inline skill chips like [/release-changelog](skill://skill-release?s=release-changelog) must sit on the surrounding text line, not hang below it.
+
 | Surface | Owner | State |
 | --- | --- | --- |
 | Issues | CodexCoder | In progress |
@@ -118,7 +121,7 @@ const adapterSchema: JsonSchemaNode = {
       title: "Adapter name",
       description: "Human-readable name shown in the adapter manager.",
       minLength: 3,
-      default: "Codex local",
+      default: "Codex",
     },
     mode: {
       type: "string",
@@ -172,7 +175,7 @@ const adapterSchema: JsonSchemaNode = {
 
 const validAdapterValues = {
   ...getDefaultValues(adapterSchema),
-  adapterName: "Codex local",
+  adapterName: "Codex",
   mode: "implementation",
   apiKey: "secret:openai-api-key",
   concurrency: 2,
@@ -196,28 +199,50 @@ const adapterErrors = {
 };
 
 const storybookSecrets: CompanySecret[] = [
-  {
-    id: "secret-openai",
-    companyId: "company-storybook",
-    name: "OPENAI_API_KEY",
-    provider: "local_encrypted",
-    externalRef: null,
-    latestVersion: 3,
-    description: null,
-    createdByAgentId: null,
+	  {
+	    id: "secret-openai",
+	    companyId: "company-storybook",
+	    scope: "company",
+	    ownerUserId: null,
+	    userSecretDefinitionId: null,
+	    key: "openai-api-key",
+	    name: "OPENAI_API_KEY",
+	    provider: "local_encrypted",
+	    status: "active",
+	    managedMode: "paperclip_managed",
+	    externalRef: null,
+	    providerConfigId: null,
+	    providerMetadata: null,
+	    latestVersion: 3,
+	    description: null,
+	    lastResolvedAt: new Date("2026-04-20T09:00:00.000Z"),
+	    lastRotatedAt: new Date("2026-04-18T10:00:00.000Z"),
+	    deletedAt: null,
+	    createdByAgentId: null,
     createdByUserId: "user-board",
     createdAt: new Date("2026-04-18T10:00:00.000Z"),
     updatedAt: new Date("2026-04-20T10:00:00.000Z"),
   },
-  {
-    id: "secret-github",
-    companyId: "company-storybook",
-    name: "GITHUB_TOKEN",
-    provider: "local_encrypted",
-    externalRef: null,
-    latestVersion: 1,
-    description: null,
-    createdByAgentId: null,
+	  {
+	    id: "secret-github",
+	    companyId: "company-storybook",
+	    scope: "company",
+	    ownerUserId: null,
+	    userSecretDefinitionId: null,
+	    key: "github-token",
+	    name: "GITHUB_TOKEN",
+	    provider: "local_encrypted",
+	    status: "active",
+	    managedMode: "paperclip_managed",
+	    externalRef: null,
+	    providerConfigId: null,
+	    providerMetadata: null,
+	    latestVersion: 1,
+	    description: null,
+	    lastResolvedAt: null,
+	    lastRotatedAt: new Date("2026-04-19T10:00:00.000Z"),
+	    deletedAt: null,
+	    createdByAgentId: null,
     createdByUserId: "user-board",
     createdAt: new Date("2026-04-19T10:00:00.000Z"),
     updatedAt: new Date("2026-04-19T10:00:00.000Z"),
@@ -277,6 +302,7 @@ const storybookProject: Project = {
   leadAgentId: "agent-codex",
   targetDate: null,
   color: "#0f766e",
+  icon: null,
   env: null,
   pauseReason: null,
   pausedAt: null,
@@ -438,7 +464,7 @@ function InlineEditorGallery() {
   );
 }
 
-function EnvVarEditorGallery() {
+function EnvironmentVariablesEditorGallery() {
   const [emptyEnv, setEmptyEnv] = useState<Record<string, EnvBinding>>({});
   const [env, setEnv] = useState<Record<string, EnvBinding>>(filledEnv);
   const createSecret = async (name: string): Promise<CompanySecret> => ({
@@ -449,16 +475,16 @@ function EnvVarEditorGallery() {
   });
 
   return (
-    <Section eyebrow="EnvVarEditor" title="Runtime environment bindings">
+    <Section eyebrow="EnvironmentVariablesEditor" title="Runtime environment bindings">
       <div className="grid gap-4 lg:grid-cols-3">
-        <StatePanel label="Empty add row" detail="Trailing blank row is the add state.">
-          <EnvVarEditor value={emptyEnv} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={(next) => setEmptyEnv(next ?? {})} />
+        <StatePanel label="Empty add row" detail="Explicit + Add variable button; no trailing ghost row.">
+          <EnvironmentVariablesEditor value={emptyEnv} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={(next) => setEmptyEnv(next ?? {})} />
         </StatePanel>
-        <StatePanel label="Plain and secret values" detail="Filled rows show edit, seal, secret select, and remove controls.">
-          <EnvVarEditor value={env} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={(next) => setEnv(next ?? {})} />
+        <StatePanel label="Plain and secret values" detail="Filled rows show text, secret picker, version tag, and remove controls.">
+          <EnvironmentVariablesEditor value={env} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={(next) => setEnv(next ?? {})} />
         </StatePanel>
         <StatePanel label="Disabled shell" disabled>
-          <EnvVarEditor value={filledEnv} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={() => undefined} />
+          <EnvironmentVariablesEditor value={filledEnv} secrets={storybookSecrets} onCreateSecret={createSecret} onChange={() => undefined} disabled />
         </StatePanel>
       </div>
     </Section>
@@ -635,7 +661,7 @@ function FormsEditorsShowcase() {
       <MarkdownBodyGallery />
       <JsonSchemaFormGallery />
       <InlineEditorGallery />
-      <EnvVarEditorGallery />
+      <EnvironmentVariablesEditorGallery />
       <ScheduleEditorGallery />
       <RoutineVariablesGallery />
       <PickerGallery />
@@ -709,4 +735,86 @@ export const AllFormsAndEditors: Story = {
 export const RoutineRunVariablesDialogOpen: Story = {
   name: "Routine Run Variables Dialog",
   render: () => <RoutineRunDialogStory />,
+};
+
+const foldCurtainLongMarkdown = [
+  "# paperclip-bench",
+  "",
+  "Ship criteria for the benchmark harness — these notes are intentionally lengthy so the fold-curtain clips them.",
+  "",
+  "## Overview",
+  "",
+  "We need a benchmark that compares agent performance across task types and model backends. This includes:",
+  "",
+  "- a **runner** that executes tasks in isolated workspaces",
+  "- a **scorer** that grades outputs against ground truth",
+  "- a **dashboard** that trends metrics over time",
+  "",
+  "## Task format",
+  "",
+  "Each task is a directory containing a `task.md`, an optional `setup.sh`, and an `expected/` fixture. The runner mounts the task, executes the agent, and diffs the resulting workspace against `expected/`.",
+  "",
+  "```ts",
+  "type TaskResult = {",
+  "  taskId: string;",
+  "  agent: string;",
+  "  exitCode: number;",
+  "  scoreBreakdown: Record<string, number>;",
+  "};",
+  "```",
+  "",
+  "## Metrics",
+  "",
+  "| Metric | Description |",
+  "| --- | --- |",
+  "| Pass@1 | First-try correctness |",
+  "| Tokens | Cost per task |",
+  "| Wall time | End-to-end minutes |",
+  "",
+  "## Next steps",
+  "",
+  "1. Land the runner with support for 3 task types.",
+  "2. Backfill 50 tasks from open-source benchmarks.",
+  "3. Wire the scorer to GitHub Actions.",
+  "4. Publish baseline numbers on the main branch.",
+  "",
+  "All of this is described in more detail in the design doc linked from the home page.",
+].join("\n");
+
+const foldCurtainShortMarkdown = "This description is short. No curtain should appear.";
+
+function FoldCurtainStory() {
+  return (
+    <StoryShell>
+      <Section
+        eyebrow="Presentation"
+        title="FoldCurtain"
+        description="Long content collapses to a preview with a bottom fade and a Show more button. Short content renders untouched."
+      >
+        <div className="space-y-6">
+          <StatePanel
+            label="Long description (collapsed)"
+            detail="Default state on every fresh page load. Natural height far exceeds the collapsed height, so the curtain activates."
+          >
+            <FoldCurtain>
+              <MarkdownBody className="text-[15px] leading-7">{foldCurtainLongMarkdown}</MarkdownBody>
+            </FoldCurtain>
+          </StatePanel>
+          <StatePanel
+            label="Short description (no curtain)"
+            detail="Content below the activation threshold renders with no curtain and no button."
+          >
+            <FoldCurtain>
+              <MarkdownBody className="text-[15px] leading-7">{foldCurtainShortMarkdown}</MarkdownBody>
+            </FoldCurtain>
+          </StatePanel>
+        </div>
+      </Section>
+    </StoryShell>
+  );
+}
+
+export const FoldCurtainShowcase: Story = {
+  name: "Fold Curtain",
+  render: () => <FoldCurtainStory />,
 };
