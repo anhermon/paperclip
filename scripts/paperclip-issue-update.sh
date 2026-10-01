@@ -142,7 +142,7 @@ while :; do
       exit 1
     fi
     if [[ -n "$status" ]]; then
-      returned_status="$(jq -r '.status // empty' <<<"$body" 2>/dev/null || true)"
+      returned_status="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(v && v.status != null ? String(v.status) : "")' "$body" 2>/dev/null || true)"
       if [[ "$returned_status" != "$status" ]]; then
         printf 'Issue update FAILED: server echoed status %s instead of requested %s.\n' "${returned_status:-<none>}" "$status" >&2
         printf '%s\n' "$body" >&2
@@ -162,6 +162,35 @@ while :; do
 
   if (( attempt >= max_attempts )); then
     printf 'Issue update FAILED after %d attempts (curl exit %s, HTTP %s). The status/comment was NOT saved — report this write as failed, do not assume it landed.\n' "$max_attempts" "$curl_exit" "${http_code:-000}" >&2
+    [[ -n "$body" ]] && printf '%s\n' "$body" >&2
+    exit 1
+  fi
+
+  # Comments on PATCH /issues/{id} are not request-idempotent. If the first
+  # attempt may already have landed (lost response / timeout), do not send the
+  # same comment again. When a status was requested, probe GET once; if the
+  # server already shows that status, treat the write as success.
+  if [[ -n "$comment" ]]; then
+    if [[ -n "$status" ]]; then
+      set +e
+      probe="$(
+        curl -sS -m 30 -X GET           "$PAPERCLIP_API_URL/api/issues/$issue_id"           -H "Authorization: Bearer $PAPERCLIP_API_KEY"           -H "X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID"           -w '\n%{http_code}'
+      )"
+      probe_exit=$?
+      set -e
+      if [[ "$probe_exit" -eq 0 ]]; then
+        probe_code="${probe##*$'\n'}"
+        probe_body="${probe%$'\n'*}"
+        if [[ "$probe_code" == 2* && -n "$probe_body" ]]; then
+          probe_status="$(node -e 'const v = JSON.parse(process.argv[1]); process.stdout.write(v && v.status != null ? String(v.status) : "")' "$probe_body" 2>/dev/null || true)"
+          if [[ "$probe_status" == "$status" ]]; then
+            printf '%s\n' "$probe_body"
+            exit 0
+          fi
+        fi
+      fi
+    fi
+    printf 'Issue update FAILED (curl exit %s, HTTP %s) with a comment payload. Not retrying — a second PATCH can duplicate the comment if the first write already landed. Verify the issue before posting again.\n' "$curl_exit" "${http_code:-000}" >&2
     [[ -n "$body" ]] && printf '%s\n' "$body" >&2
     exit 1
   fi
