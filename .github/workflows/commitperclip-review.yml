@@ -35,6 +35,10 @@ jobs:
 
       - name: Generate commitperclip token
         id: token
+        # continue-on-error so the job does not fail in forks where
+        # COMMITPERCLIP_KEY is not configured; quality gates are conditioned
+        # on the token step succeeding.
+        continue-on-error: true
         run: |
           TOKEN=$(node .github/scripts/get-bot-token.mjs)
           echo "::add-mask::$TOKEN"
@@ -44,7 +48,9 @@ jobs:
 
       - name: Run quality gates
         id: quality
-        if: github.event.pull_request.user.login != 'dependabot[bot]'
+        if: >-
+          steps.token.outcome == 'success' &&
+          github.event.pull_request.user.login != 'dependabot[bot]'
         run: node .github/scripts/run-quality-gates.mjs
         continue-on-error: true
         env:
@@ -56,6 +62,7 @@ jobs:
 
       - name: Fail if quality gates failed
         if: >-
+          steps.token.outcome == 'success' &&
           github.event.pull_request.user.login != 'dependabot[bot]' &&
           steps.quality.outcome == 'failure'
         run: |
