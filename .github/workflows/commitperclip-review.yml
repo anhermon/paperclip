@@ -14,6 +14,10 @@ permissions:
 
 jobs:
   review:
+    # Both Dependency Review and COMMITPERCLIP_KEY require capabilities that
+    # are only present on the upstream (paperclipai/paperclip). Skip the job
+    # on forks to avoid spurious failures; the upstream CI handles it.
+    if: github.repository == 'paperclipai/paperclip'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
