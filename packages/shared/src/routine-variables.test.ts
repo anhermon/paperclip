@@ -3,8 +3,11 @@ import {
   isBuiltinRoutineVariable,
   isRoutineDateVariableName,
   isValidRoutineDateString,
+  isValidRoutineVariableName,
   syncRoutineVariablesWithTemplate,
   stringifyRoutineVariableValue,
+  extractRoutineVariableNames,
+  getBuiltinRoutineVariableValues,
   interpolateRoutineTemplate,
   BUILTIN_ROUTINE_VARIABLE_NAMES,
 } from "./routine-variables.js";
@@ -13,6 +16,7 @@ import {
 // isBuiltinRoutineVariable
 // ============================================================================
 
+describe("isBuiltinRoutineVariable", () => {
   it("deduplicates placeholder names across the routine title and description", () => {
     expect(
       extractRoutineVariableNames([
