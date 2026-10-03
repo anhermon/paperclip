@@ -4805,23 +4805,6 @@ const IssueChatComposer = forwardRef<
     });
   }
 
-  function queueViewportRestore(snapshot: ReturnType<typeof captureComposerViewportSnapshot>) {
-    if (!snapshot) return;
-    requestAnimationFrame(() => {
-      restoreComposerViewportSnapshot(snapshot, composerContainerRef.current);
-    });
-  }
-
-  function focusComposer() {
-    if (typeof composerContainerRef.current?.scrollIntoView === "function") {
-      composerContainerRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
-    }
-    requestAnimationFrame(() => {
-      window.scrollBy({ top: COMPOSER_FOCUS_SCROLL_PADDING_PX, behavior: "smooth" });
-      editorRef.current?.focus();
-    });
-  }
-
   useEffect(() => {
     if (!draftKey) return;
     setBody(loadDraft(draftKey));

@@ -123,7 +123,6 @@ import {
   ListTree,
 } from "lucide-react";
 
-const INBOX_HEARTBEAT_RUN_LIMIT = 200;
 import { Input } from "@/components/ui/input";
 import { PageTabBar } from "../components/PageTabBar";
 import type { Approval, HeartbeatRun, Issue, JoinRequest } from "@paperclipai/shared";
@@ -1952,31 +1951,6 @@ function StreamlinedInbox() {
     },
   });
 
-  const unarchiveIssueMutation = useMutation({
-    mutationFn: (id: string) => issuesApi.unarchiveFromInbox(id),
-    onMutate: (id) => {
-      setActionError(null);
-      setUnarchivingIssueIds((prev) => new Set(prev).add(id));
-    },
-    onError: (err) => {
-      setActionError(err instanceof Error ? err.message : "Failed to undo inbox archive");
-    },
-    onSuccess: (_data, id) => {
-      setUndoableArchiveIssueIds((prev) => {
-        const next = prev.filter((issueId) => issueId !== id);
-        return next;
-      });
-    },
-    onSettled: (_data, _error, id) => {
-      setUnarchivingIssueIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      invalidateInboxIssueQueries();
-    },
-  });
-
   const markReadMutation = useMutation({
     mutationFn: (id: string) => issuesApi.markRead(id),
     onMutate: (id) => {
@@ -2189,24 +2163,6 @@ function StreamlinedInbox() {
       // Navigation works on every tab; archive/undo (and a/y below) stay
       // scoped to the "mine" tab, the only place items are archivable.
       const undoArchiveAction = !st.canArchive ? "none" : resolveInboxUndoArchiveKeyAction({
-        hasUndoableArchive: st.undoableArchiveIssueIds.length > 0,
-        defaultPrevented: e.defaultPrevented,
-        key: e.key,
-        metaKey: e.metaKey,
-        ctrlKey: e.ctrlKey,
-        altKey: e.altKey,
-        target,
-        hasOpenDialog: hasBlockingShortcutDialog(document),
-      });
-      if (undoArchiveAction === "undo_archive") {
-        const issueId = st.undoableArchiveIssueIds[st.undoableArchiveIssueIds.length - 1];
-        if (!issueId || st.unarchivingIssueIds.has(issueId)) return;
-        e.preventDefault();
-        act.undoArchiveIssue(issueId);
-        return;
-      }
-
-      const undoArchiveAction = resolveInboxUndoArchiveKeyAction({
         hasUndoableArchive: st.undoableArchiveIssueIds.length > 0,
         defaultPrevented: e.defaultPrevented,
         key: e.key,

@@ -4433,26 +4433,6 @@ export function TaskDetailSurface({ conversation, tasksTab }: { tasksTab?: TaskS
     },
   });
 
-  const updateChildIssue = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => issuesApi.update(id, data),
-    onSuccess: () => {
-      if (resolvedCompanyId) {
-        queryClient.invalidateQueries({ queryKey: ["issues", resolvedCompanyId] });
-        queryClient.invalidateQueries({ queryKey: queryKeys.sidebarBadges(resolvedCompanyId) });
-      }
-    },
-    onError: (err) => {
-      pushToast({
-        title: "Issue update failed",
-        body: err instanceof Error ? err.message : "Unable to save sub-issue changes",
-        tone: "error",
-      });
-    },
-  });
-  const handleChildIssueUpdate = useCallback((id: string, data: Record<string, unknown>) => {
-    updateChildIssue.mutate({ id, data });
-  }, [updateChildIssue]);
-
   const approvalDecision = useMutation({
     mutationFn: async ({
       approvalId,
