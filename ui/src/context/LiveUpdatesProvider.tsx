@@ -706,30 +706,6 @@ function applyRunLiveStatusPatchToCaches(
   return changed;
 }
 
-function invalidateVisibleIssueRunQueries(
-  queryClient: QueryClient,
-  pathname: string,
-  payload: Record<string, unknown>,
-  options?: VisibleRouteOptions,
-): boolean {
-  const context = resolveVisibleIssueRouteContext(queryClient, pathname, options);
-  if (!context) return false;
-
-  const runId = readString(payload.runId);
-  const agentId = readString(payload.agentId);
-  const matchesVisibleIssue =
-    (runId !== null && context.runIds.has(runId)) ||
-    (!!agentId && !!context.assigneeAgentId && agentId === context.assigneeAgentId);
-  if (!matchesVisibleIssue) return false;
-
-  queryClient.invalidateQueries({ queryKey: queryKeys.issues.detail(context.routeIssueRef) });
-  queryClient.invalidateQueries({ queryKey: queryKeys.issues.activity(context.routeIssueRef) });
-  queryClient.invalidateQueries({ queryKey: queryKeys.issues.runs(context.routeIssueRef) });
-  queryClient.invalidateQueries({ queryKey: queryKeys.issues.liveRuns(context.routeIssueRef) });
-  queryClient.invalidateQueries({ queryKey: queryKeys.issues.activeRun(context.routeIssueRef) });
-  return true;
-}
-
 function shouldSuppressAgentStatusToastForVisibleIssue(
   queryClient: QueryClient,
   pathname: string,
