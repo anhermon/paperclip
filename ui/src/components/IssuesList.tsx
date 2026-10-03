@@ -277,20 +277,6 @@ function loadIssueCollectionPreferences(
   });
 }
 
-function getInitialViewState(key: string, initialAssignees?: string[]): IssueViewState {
-  const stored = getViewState(key);
-  if (!initialAssignees) return stored;
-  return {
-    ...stored,
-    assignees: initialAssignees,
-    statuses: [],
-  };
-}
-
-function getIssueColumnsStorageKey(key: string): string {
-  return `${key}:issue-columns`;
-}
-
 function loadIssueColumns(key: string): InboxIssueColumn[] {
   try {
     const raw = localStorage.getItem(getIssueColumnsStorageKey(key));

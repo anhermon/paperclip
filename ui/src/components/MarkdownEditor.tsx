@@ -186,30 +186,6 @@ function toStoredMarkdown(markdown: string): string {
   return unescapeAngleBracketEscapes(unescapeBlockquoteMarkers(markdown));
 }
 
-function readHtmlAttribute(attrs: string, name: string): string | null {
-  const match = new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(attrs);
-  return match?.[2] ?? match?.[3] ?? match?.[4] ?? null;
-}
-
-function convertHtmlImagesToMarkdown(text: string): string {
-  return text.replace(/<img\b([^>]*?)\/?>/gi, (tag, attrs: string) => {
-    const src = readHtmlAttribute(attrs, "src");
-    if (!src) return tag;
-    const alt = readHtmlAttribute(attrs, "alt") ?? "image";
-    const title = readHtmlAttribute(attrs, "title");
-    const escapedAlt = alt.replace(/[[\]]/g, "\\$&");
-    const escapedTitle = title?.replace(/"/g, '\\"');
-    return escapedTitle
-      ? `![${escapedAlt}](${src} "${escapedTitle}")`
-      : `![${escapedAlt}](${src})`;
-  });
-}
-
-function prepareMarkdownForEditor(value: string): string {
-  const normalizedLineEndings = value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  return convertHtmlImagesToMarkdown(normalizedLineEndings);
-}
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

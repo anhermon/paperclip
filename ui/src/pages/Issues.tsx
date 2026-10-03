@@ -65,20 +65,6 @@ export function buildIssuesSearchUrl(currentHref: string, search: string): strin
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-export function buildIssuesSearchUrl(currentHref: string, search: string): string | null {
-  const url = new URL(currentHref);
-  const currentSearch = url.searchParams.get("q") ?? "";
-  if (currentSearch === search) return null;
-
-  if (search.length > 0) {
-    url.searchParams.set("q", search);
-  } else {
-    url.searchParams.delete("q");
-  }
-
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
 export function Issues() {
   const { enabled: streamlinedUiEnabled } = useStreamlinedUiEnabled();
   const issuesPresentation = resolveIssuesPresentation(streamlinedUiEnabled);
