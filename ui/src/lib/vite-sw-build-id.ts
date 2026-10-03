@@ -54,41 +54,28 @@ export function serviceWorkerBuildIdPlugin(
   options: { serviceWorkerFileName?: string } = {},
 ): Plugin {
   const serviceWorkerFileName = options.serviceWorkerFileName ?? "sw.js";
-  let buildId: string | null = null;
-  let outDir = "dist";
   let publicDir = "public";
 
   return {
     name: "paperclip-sw-build-id",
     apply: "build",
     configResolved(config) {
-      outDir = config.build.outDir;
       publicDir = config.publicDir;
     },
+    // Emit the stamped sw.js as a bundle asset so Rolldown writes it during
+    // writeBundle. Vite 8.3+ moved copyPublicDir to run after closeBundle, so
+    // a closeBundle hook can no longer reliably read or overwrite dist/sw.js.
+    // Emitting via generateBundle ensures the file is part of the bundle output;
+    // Vite's copyPublicDir skips files that already exist in outDir (force:false).
     generateBundle(_options, bundle) {
       const entry = Object.values(bundle).find(
         (chunk) => chunk.type === "chunk" && chunk.isEntry,
       );
-      if (entry) {
-        buildId = deriveBuildIdFromEntryFileName(entry.fileName);
-      }
-    },
-    // order: 'post' ensures this runs after Vite's built-in closeBundle hooks,
-    // including the hook that copies public/ assets into outDir. Vite 8.3+
-    // changed the public-asset copy to run later in the pipeline, so without
-    // this ordering the sw.js file would not yet exist when we try to stamp it.
-    closeBundle: {
-      order: "post",
-      handler() {
-        const swDestPath = path.resolve(outDir, serviceWorkerFileName);
-        // Prefer the already-copied outDir version; fall back to the public-
-        // directory source when Vite has not yet written it (edge case).
-        const swSourcePath = path.resolve(publicDir, serviceWorkerFileName);
-        const readFrom = fs.existsSync(swDestPath) ? swDestPath : swSourcePath;
-        const source = fs.readFileSync(readFrom, "utf8");
-        const stamped = stampServiceWorkerBuildId(source, buildId ?? "build");
-        fs.writeFileSync(swDestPath, stamped);
-      },
+      const buildId = entry ? deriveBuildIdFromEntryFileName(entry.fileName) : "build";
+      const swSourcePath = path.resolve(publicDir, serviceWorkerFileName);
+      const source = fs.readFileSync(swSourcePath, "utf8");
+      const stamped = stampServiceWorkerBuildId(source, buildId);
+      this.emitFile({ type: "asset", fileName: serviceWorkerFileName, source: stamped });
     },
   };
 }
