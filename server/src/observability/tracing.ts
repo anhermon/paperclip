@@ -16,11 +16,13 @@ export function initTracing(): void {
 
   // Dynamically import to avoid loading OTel SDK when tracing is disabled.
   // This keeps startup fast for the common case.
-  import("@opentelemetry/sdk-node")
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dynamicImport = (mod: string): Promise<any> => import(/* @vite-ignore */ mod as string);
+  dynamicImport("@opentelemetry/sdk-node")
     .then(({ NodeSDK }) =>
-      import("@opentelemetry/auto-instrumentations-node").then(
+      dynamicImport("@opentelemetry/auto-instrumentations-node").then(
         ({ getNodeAutoInstrumentations }) =>
-          import("@opentelemetry/exporter-trace-otlp-http").then(({ OTLPTraceExporter }) => {
+          dynamicImport("@opentelemetry/exporter-trace-otlp-http").then(({ OTLPTraceExporter }) => {
             const exporter = new OTLPTraceExporter({ url: `${endpoint}/v1/traces` });
 
             const sdk = new NodeSDK({

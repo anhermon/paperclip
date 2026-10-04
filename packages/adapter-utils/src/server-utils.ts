@@ -309,6 +309,7 @@ export interface PaperclipSkillEntry {
   currentVersionId?: string | null;
   sourceStatus?: "available" | "missing";
   missingDetail?: string | null;
+  roles?: string[] | null;
 }
 
 export interface PaperclipDesiredSkillEntry {
@@ -2434,6 +2435,7 @@ function renderPaperclipWakePromptBody(
           "",
         ]
       : [];
+  const isCompressedResume = normalized.compressedForResume === true;
   const lines = resumedSession
     ? [
         "## Paperclip Resume Delta",

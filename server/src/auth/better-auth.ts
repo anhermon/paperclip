@@ -46,6 +46,7 @@ type BetterAuthSessionResolver = {
 
 type BetterAuthInstance = BetterAuthHandlerTarget & BetterAuthSessionResolver;
 
+const AUTH_DEV_SECRET = "paperclip-dev-secret";
 const AUTH_COOKIE_PREFIX_FALLBACK = "default";
 const AUTH_COOKIE_PREFIX_INVALID_SEGMENTS_RE = /[^a-zA-Z0-9_-]+/g;
 

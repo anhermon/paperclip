@@ -100,7 +100,7 @@ describe("errorHandler — HttpError server errors", () => {
 describe("errorHandler — ZodError", () => {
   it("responds with 400 for ZodError", () => {
     const res = makeRes();
-    const zodError = new ZodError([{ code: "invalid_type", path: ["name"], message: "Required", expected: "string", received: "undefined" }]);
+    const zodError = new ZodError([{ code: "invalid_type", path: ["name"], message: "Required", expected: "string" }]);
     errorHandler(zodError, makeReq(), res, next);
     expect(res.status).toHaveBeenCalledWith(400);
   });

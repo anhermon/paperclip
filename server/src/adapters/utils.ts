@@ -7,6 +7,13 @@ import * as serverUtils from "@paperclipai/adapter-utils/server-utils";
 import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
 export type { RunProcessResult };
 
+export interface BuildInvocationEnvForLogsOptions {
+  runtimeEnv?: Record<string, string>;
+  includeRuntimeKeys?: string[];
+  resolvedCommand?: string;
+  resolvedCommandEnvKey?: string;
+}
+
 export const runningProcesses: Map<string, { child: ChildProcess; graceSec: number; processGroupId: number | null }> =
   serverUtils.runningProcesses;
 export const MAX_CAPTURE_BYTES = serverUtils.MAX_CAPTURE_BYTES;

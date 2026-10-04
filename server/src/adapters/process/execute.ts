@@ -44,7 +44,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const runtimeEnv = ensurePathInEnv({ ...process.env, ...env });
   const resolvedCommand = await resolveCommandForLogs(command, cwd, runtimeEnv);
   const loggedEnv = buildInvocationEnvForLogs(env, {
-    runtimeEnv,
+    runtimeEnv: runtimeEnv as Record<string, string>,
     includeRuntimeKeys: ["HOME"],
     resolvedCommand,
   });

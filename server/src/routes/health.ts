@@ -42,14 +42,6 @@ import {
   writeHotRestartIntent,
 } from "../services/hot-restart.js";
 
-function shouldExposeFullHealthDetails(
-  actorType: "none" | "board" | "agent" | null | undefined,
-  deploymentMode: DeploymentMode,
-) {
-  if (deploymentMode !== "authenticated") return true;
-  return actorType === "board" || actorType === "agent";
-}
-
 function matchesSharedToken(expectedToken: string | undefined | null, providedToken: string | undefined) {
   const expectedValue = expectedToken?.trim();
   const token = providedToken?.trim();

@@ -29,12 +29,6 @@ export function assertAuthenticated(req: Request) {
   }
 }
 
-export function assertAuthenticated(req: Request) {
-  if (req.actor.type === "none") {
-    throw unauthorized();
-  }
-}
-
 /** Throws a 403 Forbidden error if the request actor is not a board (user) actor. */
 export function assertBoard(req: Request) {
   if (req.actor.type !== "board") {

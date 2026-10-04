@@ -332,7 +332,6 @@ import {
   selectHeartbeatRunFinalAgentMessage,
   type RunPresentationDecision,
 } from "./heartbeat-run-summary.js";
-import { logActivity, type LogActivityInput } from "./activity-log.js";
 import {
   buildHeartbeatRunStopMetadata,
   mergeHeartbeatRunStopMetadata,
@@ -1924,36 +1923,6 @@ export async function resolveExecutionRunAdapterConfig(input: {
   };
 }
 
-export function extractMentionedSkillIdsFromSources(
-  sources: Array<string | null | undefined>,
-): string[] {
-  const mentionedIds = new Set<string>();
-  for (const source of sources) {
-    if (typeof source !== "string" || source.length === 0) continue;
-    for (const skillId of extractSkillMentionIds(source)) {
-      if (!isUuidLike(skillId)) continue;
-      mentionedIds.add(skillId);
-    }
-  }
-  return [...mentionedIds];
-}
-
-export function applyRunScopedMentionedSkillKeys(
-  config: Record<string, unknown>,
-  skillKeys: string[],
-): Record<string, unknown> {
-  const normalizedSkillKeys = Array.from(
-    new Set(skillKeys.map((value) => value.trim()).filter(Boolean)),
-  );
-  if (normalizedSkillKeys.length === 0) return config;
-
-  const existingPreference = readPaperclipSkillSyncPreference(config);
-  return writePaperclipSkillSyncPreference(config, [
-    ...existingPreference.desiredSkillEntries,
-    ...normalizedSkillKeys,
-  ]);
-}
-
 export function computeBoundedTransientHeartbeatRetrySchedule(
   attempt: number,
   now = new Date(),
@@ -1973,60 +1942,6 @@ export function computeBoundedTransientHeartbeatRetrySchedule(
     dueAt: new Date(now.getTime() + delayMs),
     maxAttempts: BOUNDED_TRANSIENT_HEARTBEAT_RETRY_MAX_ATTEMPTS,
   };
-}
-
-async function resolveRunScopedMentionedSkillKeys(input: {
-  db: Db;
-  companyId: string;
-  issueId: string | null;
-}): Promise<string[]> {
-  if (!input.issueId) return [];
-
-  const issue = await input.db
-    .select({
-      title: issues.title,
-      description: issues.description,
-    })
-    .from(issues)
-    .where(
-      and(eq(issues.id, input.issueId), eq(issues.companyId, input.companyId)),
-    )
-    .then((rows) => rows[0] ?? null);
-  if (!issue) return [];
-
-  const comments = await input.db
-    .select({ body: issueComments.body })
-    .from(issueComments)
-    .where(
-      and(
-        eq(issueComments.issueId, input.issueId),
-        eq(issueComments.companyId, input.companyId),
-        isNull(issueComments.deletedAt),
-      ),
-    );
-  const mentionedSkillIds = extractMentionedSkillIdsFromSources([
-    issue.title,
-    issue.description ?? "",
-    ...comments.map((comment) => comment.body),
-  ]);
-  if (mentionedSkillIds.length === 0) return [];
-
-  const skillRows = await input.db
-    .select({
-      id: companySkillsTable.id,
-      key: companySkillsTable.key,
-    })
-    .from(companySkillsTable)
-    .where(
-      and(
-        eq(companySkillsTable.companyId, input.companyId),
-        inArray(companySkillsTable.id, mentionedSkillIds),
-      ),
-    );
-  const skillKeyById = new Map(skillRows.map((row) => [row.id, row.key]));
-  return mentionedSkillIds
-    .map((skillId) => skillKeyById.get(skillId) ?? null)
-    .filter((skillKey): skillKey is string => Boolean(skillKey));
 }
 
 export function leaseReleaseStatusForRunStatus(

@@ -75,6 +75,7 @@ import {
   isClaudePoisonedPreviousMessageIdError,
   isClaudeImageProcessingError,
   isClaudeModelNotFoundError,
+  detectClaudeRateLimited,
 } from "./parse.js";
 import {
   materializeRemoteClaudeConfig,
@@ -984,7 +985,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         env: loggedEnv,
         prompt,
         promptMetrics,
-        heartbeatLayers,
         context,
       });
     }

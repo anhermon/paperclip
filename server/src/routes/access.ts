@@ -48,6 +48,7 @@ import {
   isUuidLike,
 } from "@paperclipai/shared";
 import type { DeploymentExposure, DeploymentMode, HumanCompanyMembershipRole } from "@paperclipai/shared";
+type PermissionKey = (typeof PERMISSION_KEYS)[number];
 import {
   forbidden,
   conflict,

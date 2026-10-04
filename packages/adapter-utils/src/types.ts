@@ -129,6 +129,12 @@ export type AdapterExecutionErrorFamily =
   | "refresh_token_expired"
   | "refresh_token_invalidated";
 
+export interface SkillInvocationReport {
+  skillName: string;
+  status: "success" | "error";
+  durationMs: number;
+}
+
 export interface AdapterExecutionResult {
   /** Positive evidence for retrying bootstrap; absent evidence never authorizes replay. */
   executionRecovery?: { kind: "bootstrap"; providerWorkStarted: false } | {
@@ -851,4 +857,6 @@ export interface CreateConfigValues {
   paperclipApiUrl?: string;
   headersJson?: string;
   password?: string;
+  adapterFallbackChain?: Array<{ adapterType: string }>;
+  fallbackToCodexOnRateLimit?: boolean;
 }

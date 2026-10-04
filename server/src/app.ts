@@ -41,6 +41,7 @@ import {
 } from "./services/company-import-transfers.js";
 import { companyTransferRunService } from "./services/company-transfer-runs.js";
 import { healthRoutes } from "./routes/health.js";
+import { metricsRoutes } from "./routes/metrics.js";
 import { cloudRuntimeIdentityMiddleware } from "./middleware/cloud-runtime-identity.js";
 import { cloudControlMiddleware } from "./middleware/cloud-control.js";
 import { cloudRoutes } from "./routes/cloud.js";
@@ -255,25 +256,6 @@ export function listenViteHmrServer(
     server.once("listening", onListening);
     server.listen(port, bindHost);
   });
-}
-
-export function shouldServeViteDevHtml(req: ExpressRequest): boolean {
-  const pathname = req.path;
-  if (VITE_DEV_STATIC_PATHS.has(pathname)) return false;
-  if (VITE_DEV_ASSET_PREFIXES.some((prefix) => pathname.startsWith(prefix)))
-    return false;
-  return req.accepts(["html"]) === "html";
-}
-
-export function shouldEnablePrivateHostnameGuard(opts: {
-  deploymentMode: DeploymentMode;
-  deploymentExposure: DeploymentExposure;
-}): boolean {
-  return (
-    opts.deploymentExposure === "private" &&
-    (opts.deploymentMode === "local_trusted" ||
-      opts.deploymentMode === "authenticated")
-  );
 }
 
 type ChatReconciliationLane =

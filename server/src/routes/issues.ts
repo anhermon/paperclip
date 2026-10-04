@@ -17,7 +17,6 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   and,
@@ -5466,6 +5465,22 @@ export function issueRoutes(
     return true;
   }
 
+  async function assertAgentRunCheckoutOwnership(
+    req: Request,
+    res: Response,
+    issue: { checkoutRunId?: string | null; executionRunId?: string | null },
+  ): Promise<boolean> {
+    if (req.actor.type !== "agent") return true;
+    const actorRunId = req.actor.runId?.trim() || null;
+    if (!actorRunId) return true;
+    const checkoutRunId = issue.checkoutRunId ?? issue.executionRunId ?? null;
+    if (checkoutRunId && checkoutRunId !== actorRunId) {
+      res.status(403).json({ error: "Run does not own the checkout for this issue" });
+      return false;
+    }
+    return true;
+  }
+
   async function assertTaskWatchdogIssueMutationAllowed(
     req: Request,
     res: Response,
@@ -8551,6 +8566,7 @@ export function issueRoutes(
         ? req.query.wakeCommentId.trim()
         : null;
 
+    const requestingAgentId = req.actor.type === "agent" ? (req.actor.agentId ?? null) : null;
     const currentExecutionWorkspacePromise = issue.executionWorkspaceId
       ? executionWorkspacesSvc.getById(issue.executionWorkspaceId)
       : Promise.resolve(null);

@@ -115,10 +115,6 @@ import {
   type WorkspaceDiffReprojectionSkipReason,
 } from "../services/provider-trace-workspace-diff-reprojection.js";
 import {
-  assertNoAgentHostWorkspaceCommandMutation,
-  collectAgentAdapterWorkspaceCommandPaths,
-} from "./workspace-command-authz.js";
-import {
   detectAdapterModel,
   findActiveServerAdapter,
   findServerAdapter,
@@ -2009,19 +2005,6 @@ export function agentRoutes(
   async function getAccessibleAgent(req: Request, res: Response, id: string) {
     const agent = await getAccessibleResource(req, res, svc.getById(id), "Agent not found");
     if (!agent) return null;
-    if (req.actor.type === "board") {
-      await assertBoardCanManageAgentsForCompany(req, agent.companyId);
-    }
-    return agent;
-  }
-
-  async function getAccessibleAgent(req: Request, res: Response, id: string) {
-    const agent = await svc.getById(id);
-    if (!agent) {
-      res.status(404).json({ error: "Agent not found" });
-      return null;
-    }
-    assertCompanyAccess(req, agent.companyId);
     if (req.actor.type === "board") {
       await assertBoardCanManageAgentsForCompany(req, agent.companyId);
     }
@@ -3991,7 +3974,7 @@ export function agentRoutes(
               companyId: updated.companyId,
               adapterType: updated.adapterType,
               config: runtimeSkillConfig,
-              agentUrlKey: updatedAgentUrlKey,
+              agentUrlKey: deriveAgentUrlKey(updated.name, updated.id),
             })
           : buildUnsupportedSkillSnapshot(updated.adapterType, desiredSkillEntries);
 
