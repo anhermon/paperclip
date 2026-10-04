@@ -6,6 +6,7 @@ import {
 import { objectWithoutDefaults } from "./partial.js";
 
 const logoAssetIdSchema = z.string().guid().nullable().optional();
+const brandColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/).optional();
 const feedbackDataSharingTermsVersionSchema = z.string().min(1).nullable().optional();
 
 const interactionResolverKindGovernanceSchema = z.object({
@@ -43,6 +44,7 @@ export const updateCompanySchema = objectWithoutDefaults(
       feedbackDataSharingConsentByUserId: z.string().min(1).nullable().optional(),
       feedbackDataSharingTermsVersion: feedbackDataSharingTermsVersionSchema,
       logoAssetId: logoAssetIdSchema,
+      brandColor: brandColorSchema,
     }),
 );
 
@@ -53,13 +55,15 @@ export const updateCompanyBrandingSchema = z
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     logoAssetId: logoAssetIdSchema,
+    brandColor: brandColorSchema,
   })
   .strict()
   .refine(
     (value) =>
       value.name !== undefined
       || value.description !== undefined
-      || value.logoAssetId !== undefined,
+      || value.logoAssetId !== undefined
+      || value.brandColor !== undefined,
     "At least one branding field must be provided",
   );
 

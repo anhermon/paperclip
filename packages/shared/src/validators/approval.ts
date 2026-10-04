@@ -13,12 +13,14 @@ export type CreateApproval = z.infer<typeof createApprovalSchema>;
 
 export const resolveApprovalSchema = z.object({
   decisionNote: multilineTextSchema.optional().nullable(),
+  decidedByUserId: z.string().default("board"),
 });
 
 export type ResolveApproval = z.infer<typeof resolveApprovalSchema>;
 
 export const requestApprovalRevisionSchema = z.object({
   decisionNote: multilineTextSchema.optional().nullable(),
+  decidedByUserId: z.string().default("board"),
 });
 
 export type RequestApprovalRevision = z.infer<typeof requestApprovalRevisionSchema>;
@@ -37,7 +39,7 @@ export type AddApprovalComment = z.infer<typeof addApprovalCommentSchema>;
 
 export const requestIssueApprovalSchema = z.object({
   type: z.enum(APPROVAL_TYPES),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.unknown()),
   comment: z.string().min(1),
   requestedByAgentId: z.string().uuid().optional().nullable(),
 });

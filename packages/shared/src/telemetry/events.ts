@@ -70,12 +70,12 @@ export function trackAgentCreated(
   client: TelemetryClient,
   dims: {
     agentRole: RawDimension<EventDimensionsMap["agent.created"]["agent_role"]>;
-    agentId: string;
+    agentId?: string;
   },
 ): void {
   client.track("agent.created", {
     agent_role: asEventDimension(dims.agentRole),
-    agent_id: dims.agentId,
+    ...(dims.agentId ? { agent_id: dims.agentId } : {}),
   });
 }
 
@@ -96,12 +96,12 @@ export function trackAgentFirstHeartbeat(
   client: TelemetryClient,
   dims: {
     agentRole: RawDimension<EventDimensionsMap["agent.first_heartbeat"]["agent_role"]>;
-    agentId: string;
+    agentId?: string;
   },
 ): void {
   client.track("agent.first_heartbeat", {
     agent_role: asEventDimension(dims.agentRole),
-    agent_id: dims.agentId,
+    ...(dims.agentId ? { agent_id: dims.agentId } : {}),
   });
 }
 
@@ -109,16 +109,16 @@ export function trackAgentTaskCompleted(
   client: TelemetryClient,
   dims: {
     agentRole: RawDimension<EventDimensionsMap["agent.task_completed"]["agent_role"]>;
-    agentId: string;
-    adapterType: RawDimension<EventDimensionsMap["agent.task_completed"]["adapter_type"]>;
+    agentId?: string;
+    adapterType?: RawDimension<EventDimensionsMap["agent.task_completed"]["adapter_type"]>;
     model?: string;
     taskId?: string;
   },
 ): void {
   client.track("agent.task_completed", {
     agent_role: asEventDimension(dims.agentRole),
-    agent_id: dims.agentId,
-    adapter_type: asEventDimension(dims.adapterType),
+    ...(dims.agentId ? { agent_id: dims.agentId } : {}),
+    ...(dims.adapterType ? { adapter_type: asEventDimension(dims.adapterType) } : {}),
     ...(dims.model ? { model: dims.model } : {}),
     ...(dims.taskId ? { task_id: client.hashPrivateRef(dims.taskId) } : {}),
   });
