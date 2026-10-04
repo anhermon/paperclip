@@ -47,6 +47,7 @@ import {
 } from "@paperclipai/plugin-sdk";
 import type {
   JsonRpcId,
+  JsonRpcMessage,
   PluginInvocationContext,
   PluginInvocationScope,
   JsonRpcResponse,
@@ -67,6 +68,15 @@ import {
 } from "./login-command.js";
 import { logger } from "../middleware/logger.js";
 import { traceparentFromContextToken } from "../instrumentation.js";
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+/** Converts a Windows absolute path to a file:// URL string; leaves POSIX paths unchanged. */
+export function normalizeForkEntrypoint(entrypoint: string, platform: string = process.platform): string {
+  return platform === "win32" ? pathToFileURL(entrypoint).href : entrypoint;
+}
 
 // ---------------------------------------------------------------------------
 // Constants

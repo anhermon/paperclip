@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
+type DbOrTx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 import {
   projects,
   projectGoals,

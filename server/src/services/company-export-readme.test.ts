@@ -24,6 +24,9 @@ function makeAgent(
     icon: null,
     capabilities: null,
     reportsToSlug: overrides.reportsToSlug ?? null,
+    reportsToExistingAgentId: null,
+    reportsToExistingAgentSlug: null,
+    permissionGrants: [],
     adapterType: "codex-local",
     adapterConfig: {},
     runtimeConfig: {},
@@ -193,7 +196,7 @@ describe("generateReadme", () => {
   it("includes content count table rows for each non-empty section", () => {
     const manifest = makeManifest({
       agents: [makeAgent()],
-      projects: [{ name: "Proj A", slug: "proj-a", path: "projects/proj-a", description: null, ownerAgentSlug: null, leadAgentSlug: null, targetDate: null, color: null, status: null, env: null, executionWorkspacePolicy: null, workspaces: [], metadata: null }],
+      projects: [{ name: "Proj A", slug: "proj-a", path: "projects/proj-a", description: null, ownerAgentSlug: null, leadAgentSlug: null, targetDate: null, color: null, icon: null, status: null, env: null, executionWorkspacePolicy: null, workspaces: [], metadata: null }],
     });
     const result = generateReadme(manifest, opts);
     expect(result).toContain("| Agents | 1 |");

@@ -24,7 +24,7 @@ describe("localEncryptedProvider — identity", () => {
   });
 
   it("has descriptor id 'local_encrypted'", () => {
-    expect(localEncryptedProvider.descriptor.id).toBe("local_encrypted");
+    expect(localEncryptedProvider.descriptor().id).toBe("local_encrypted");
   });
 });
 

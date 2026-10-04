@@ -6,6 +6,7 @@ import {
   budgetIncidents,
   companyMemberships,
   costEvents,
+  goals as goalsTable,
   heartbeatRuns,
   invites,
   issues as issuesTable,
@@ -27,7 +28,7 @@ import type {
   PluginIssueOrchestrationSummary,
   PluginExecutionWorkspaceMetadata,
 } from "@paperclipai/plugin-sdk";
-import type { CreateIssueThreadInteraction, InviteJoinType, IssueDocumentSummary, PermissionKey, PrincipalType } from "@paperclipai/shared";
+import type { CreateIssueThreadInteraction, GoalLevel, GoalStatus, InviteJoinType, IssueDocumentSummary, PermissionKey, PrincipalType } from "@paperclipai/shared";
 import { pluginOperationIssueOriginKind } from "@paperclipai/shared";
 import { companyService } from "./companies.js";
 import { agentService } from "./agents.js";
@@ -78,7 +79,7 @@ import { getTelemetryClient } from "../telemetry.js";
 import { accessService } from "./access.js";
 import { authorizationService, type AuthorizationActor } from "./authorization.js";
 import { redactEventPayload, sanitizeRecord } from "../redaction.js";
-import type { WorkerHostCallContext } from "@paperclipai/plugin-sdk";
+import type { WorkerHostCallContext, PluginStateScopeKind, PluginEventType, EventFilter } from "@paperclipai/plugin-sdk";
 import {
   normalizeProviderFamily,
   SANDBOX_STARTUP_SPAN_ATTRS,

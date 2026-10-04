@@ -573,42 +573,6 @@ function buildSkippedStageCompletedState(input: {
   };
 }
 
-function buildStateWithCompletedStages(input: {
-  previous: IssueExecutionState | null;
-  completedStageIds: string[];
-  returnAssignee: IssueExecutionStagePrincipal | null;
-}): IssueExecutionState {
-  return {
-    status: input.previous?.status ?? PENDING_STATUS,
-    currentStageId: input.previous?.currentStageId ?? null,
-    currentStageIndex: input.previous?.currentStageIndex ?? null,
-    currentStageType: input.previous?.currentStageType ?? null,
-    currentParticipant: input.previous?.currentParticipant ?? null,
-    returnAssignee: input.previous?.returnAssignee ?? input.returnAssignee,
-    completedStageIds: input.completedStageIds,
-    lastDecisionId: input.previous?.lastDecisionId ?? null,
-    lastDecisionOutcome: input.previous?.lastDecisionOutcome ?? null,
-  };
-}
-
-function buildSkippedStageCompletedState(input: {
-  previous: IssueExecutionState | null;
-  completedStageIds: string[];
-  returnAssignee: IssueExecutionStagePrincipal | null;
-}): IssueExecutionState {
-  return {
-    status: COMPLETED_STATUS,
-    currentStageId: null,
-    currentStageIndex: null,
-    currentStageType: null,
-    currentParticipant: null,
-    returnAssignee: input.previous?.returnAssignee ?? input.returnAssignee,
-    completedStageIds: input.completedStageIds,
-    lastDecisionId: input.previous?.lastDecisionId ?? null,
-    lastDecisionOutcome: input.previous?.lastDecisionOutcome ?? null,
-  };
-}
-
 function buildPendingState(input: {
   previous: IssueExecutionState | null;
   stage: IssueExecutionStage;

@@ -3646,23 +3646,6 @@ export function compactRunLogChunk(
   return `${normalized.slice(0, headChars)}${marker}${normalized.slice(normalized.length - tailChars)}`;
 }
 
-function redactInlineBase64ImageData(chunk: string) {
-  return chunk.replace(INLINE_BASE64_IMAGE_DATA_RE, (_match, prefix: string, data: string, suffix: string) =>
-    `${prefix}[omitted base64 image data: ${data.length} chars]${suffix}`,
-  );
-}
-
-export function compactRunLogChunk(chunk: string, maxChars = MAX_PERSISTED_LOG_CHUNK_CHARS) {
-  const normalized = redactInlineBase64ImageData(chunk);
-  if (normalized.length <= maxChars) return normalized;
-
-  const headChars = Math.max(0, Math.floor(maxChars * 0.6));
-  const tailChars = Math.max(0, Math.floor(maxChars * 0.25));
-  const omittedChars = Math.max(0, normalized.length - headChars - tailChars);
-  const marker = `\n[paperclip truncated run log chunk: omitted ${omittedChars} chars]\n`;
-  return `${normalized.slice(0, headChars)}${marker}${normalized.slice(normalized.length - tailChars)}`;
-}
-
 function normalizeMaxConcurrentRuns(value: unknown) {
   const parsed = Math.floor(
     asNumber(value, HEARTBEAT_MAX_CONCURRENT_RUNS_DEFAULT),
@@ -8033,6 +8016,7 @@ export async function buildPaperclipWakePayload(input: {
     issueDescriptionTruncated ||
     planReviewContext?.truncated === true ||
     documentReviewContext?.truncated === true;
+  const skippedCommentCount = 0;
   const recoveryActionId = readNonEmptyString(
     input.contextSnapshot.recoveryActionId,
   );
@@ -8246,7 +8230,7 @@ export async function buildPaperclipWakePayload(input: {
         }
       : null,
     commentIds,
-    latestCommentId: allCommentIds[allCommentIds.length - 1] ?? null,
+    latestCommentId: commentIds[commentIds.length - 1] ?? null,
     comments,
     annotationDeltas,
     planReviewContext,
@@ -16401,6 +16385,36 @@ export function heartbeatService(
     });
   }
 
+  async function reapStaleExecutionRunLocks() {
+    const staleIssues = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .innerJoin(heartbeatRuns, eq(issues.executionRunId, heartbeatRuns.id))
+      .where(notInArray(heartbeatRuns.status, ["queued", "running"]));
+    if (staleIssues.length === 0) return { reaped: 0, issueIds: [] };
+    const issueIds = staleIssues.map((r) => r.id);
+    await db
+      .update(issues)
+      .set({ executionRunId: null, checkoutRunId: null })
+      .where(inArray(issues.id, issueIds));
+    return { reaped: issueIds.length, issueIds };
+  }
+
+  async function agentHasActiveIssues(agentId: string) {
+    const row = await db
+      .select({ id: issues.id })
+      .from(issues)
+      .where(
+        and(
+          eq(issues.assigneeAgentId, agentId),
+          inArray(issues.status, ["todo", "in_progress"]),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    return row !== null;
+  }
+
   async function promoteDueScheduledRetries(now = new Date()) {
     const cutoff = await getWorktreeExecutionCutoff();
     const result = await runDispatch.promoteDueScheduledRetries({
@@ -16656,6 +16670,7 @@ export function heartbeatService(
           heartbeat.dailySpendCentsLimit ??
           heartbeat.dailyBudgetCents,
       ),
+      idleBackoffMultiplier: Math.max(1, asNumber(heartbeat.idleBackoffMultiplier, 1)),
     };
   }
 
@@ -29426,8 +29441,6 @@ export function heartbeatService(
     decorateActiveRunStatus: decorateHeartbeatRunRuntimeStatus,
     recordRuntimeProgress: recordCurrentHeartbeatRunRuntimeProgress,
     sweepExpiredRuntimeStatuses: sweepExpiredHeartbeatRunRuntimeStatuses,
-
-    getRunLogAccess,
 
     getRuntimeState: async (agentId: string) => {
       const state = await getRuntimeState(agentId);

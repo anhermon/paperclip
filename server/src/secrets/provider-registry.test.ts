@@ -30,15 +30,15 @@ describe("getSecretProvider", () => {
 
   it("returned provider has a descriptor with matching id", () => {
     const provider = getSecretProvider("local_encrypted");
-    expect(provider.descriptor.id).toBe("local_encrypted");
-    expect(typeof provider.descriptor.label).toBe("string");
-    expect(provider.descriptor.label.length).toBeGreaterThan(0);
+    expect(provider.descriptor().id).toBe("local_encrypted");
+    expect(typeof provider.descriptor().label).toBe("string");
+    expect(provider.descriptor().label.length).toBeGreaterThan(0);
   });
 
   it("stub providers have descriptor with requiresExternalRef=true", () => {
     for (const id of ["aws_secrets_manager", "gcp_secret_manager", "vault"] as const) {
       const provider = getSecretProvider(id);
-      expect(provider.descriptor.requiresExternalRef).toBe(true);
+      expect(provider.descriptor().requiresExternalRef).toBe(true);
     }
   });
 

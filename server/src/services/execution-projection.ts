@@ -6,6 +6,7 @@ import {
   nativeRunFinalizations,
   type Db,
 } from "@paperclipai/db";
+type DbOrTx = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 import type { ExecutionProjection } from "@paperclipai/shared";
 import { EXECUTION_CONTROL_DEADLINE_MS } from "./execution-control-deadline.js";
 import { executionFailureRetryCount } from "./execution-recovery-attempt.js";
@@ -44,7 +45,7 @@ type Recovery = Pick<
 
 /** Batched reads; list consumers do not perform per-task polling. */
 export async function executionProjectionsForRuns(
-  db: Db,
+  db: DbOrTx,
   companyId: string,
   runIds: string[],
   now = new Date(),

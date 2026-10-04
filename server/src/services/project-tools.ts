@@ -3,12 +3,14 @@ import { z } from "zod";
 import { CAPABILITY_SEMANTIC_TOOL_CATALOG } from "../vendor/paperclip-runner/index.js";
 import { badRequest } from "../errors.js";
 
+type CatalogTool = typeof CAPABILITY_SEMANTIC_TOOL_CATALOG[number];
+
 export const PROJECT_TOOL_NAMES = ["create_project", "list_project_repositories", "list_projects"];
 export function projectToolDefinitions(workMode: string, includeTask = false) {
-  return CAPABILITY_SEMANTIC_TOOL_CATALOG.filter(tool =>
+  return CAPABILITY_SEMANTIC_TOOL_CATALOG.filter((tool: CatalogTool) =>
     (PROJECT_TOOL_NAMES.includes(tool.operationId) || includeTask && tool.operationId === "create_task")
     && tool.allowedModes.includes(workMode as "standard"),
-  ).map(tool => ({ name: tool.operationId, description: tool.description,
+  ).map((tool: CatalogTool) => ({ name: tool.operationId, description: tool.description,
     inputSchema: tool.operationId === "create_project"
       ? z.toJSONSchema(createProjectSchema.extend({ idempotencyKey: z.string().min(1).max(255) }))
       : tool.inputSchema,

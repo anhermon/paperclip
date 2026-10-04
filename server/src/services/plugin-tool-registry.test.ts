@@ -112,7 +112,7 @@ describe("buildNamespacedName", () => {
 describe("registerPlugin", () => {
   it("registers tools from manifest and makes them discoverable", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo"), makeTool("bar")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo"), makeTool("bar")]), "myplugin");
 
     expect(registry.toolCount()).toBe(2);
     expect(registry.listTools()).toHaveLength(2);
@@ -134,9 +134,9 @@ describe("registerPlugin", () => {
     expect(registered!.parametersSchema).toEqual({ type: "object" });
   });
 
-  it("falls back to pluginId as pluginDbId when not provided", () => {
+  it("stores pluginId as pluginDbId when pluginId is passed explicitly", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]), "myplugin");
 
     const registered = registry.getTool("myplugin:foo");
     expect(registered!.pluginDbId).toBe("myplugin");
@@ -144,11 +144,11 @@ describe("registerPlugin", () => {
 
   it("is idempotent — re-registering replaces previous tools", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("p", makeManifest("p", [makeTool("a"), makeTool("b")]));
+    registry.registerPlugin("p", makeManifest("p", [makeTool("a"), makeTool("b")]), "p");
     expect(registry.toolCount()).toBe(2);
 
     // Re-register with different tool set
-    registry.registerPlugin("p", makeManifest("p", [makeTool("c")]));
+    registry.registerPlugin("p", makeManifest("p", [makeTool("c")]), "p");
     expect(registry.toolCount()).toBe(1);
     expect(registry.getTool("p:c")).not.toBeNull();
     expect(registry.getTool("p:a")).toBeNull();
@@ -159,7 +159,7 @@ describe("registerPlugin", () => {
     const registry = createPluginToolRegistry();
     const manifest = makeManifest("empty-plugin");
     delete (manifest as any).tools;
-    registry.registerPlugin("empty-plugin", manifest);
+    registry.registerPlugin("empty-plugin", manifest, "empty-plugin");
 
     expect(registry.toolCount()).toBe(0);
     expect(registry.listTools()).toEqual([]);
@@ -167,15 +167,15 @@ describe("registerPlugin", () => {
 
   it("handles manifest with empty tools array", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("empty-plugin", makeManifest("empty-plugin", []));
+    registry.registerPlugin("empty-plugin", makeManifest("empty-plugin", []), "empty-plugin");
 
     expect(registry.toolCount()).toBe(0);
   });
 
   it("multiple plugins coexist independently", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]));
-    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]));
+    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]), "plugin-a");
+    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]), "plugin-b");
 
     expect(registry.toolCount()).toBe(3);
     expect(registry.toolCount("plugin-a")).toBe(2);
@@ -190,7 +190,7 @@ describe("registerPlugin", () => {
 describe("unregisterPlugin", () => {
   it("removes all tools for the given plugin", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("p", makeManifest("p", [makeTool("a"), makeTool("b")]));
+    registry.registerPlugin("p", makeManifest("p", [makeTool("a"), makeTool("b")]), "p");
     registry.unregisterPlugin("p");
 
     expect(registry.toolCount()).toBe(0);
@@ -200,8 +200,8 @@ describe("unregisterPlugin", () => {
 
   it("does not affect other plugins", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x")]));
-    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("y")]));
+    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x")]), "plugin-a");
+    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("y")]), "plugin-b");
 
     registry.unregisterPlugin("plugin-a");
 
@@ -224,7 +224,7 @@ describe("unregisterPlugin", () => {
 describe("getTool", () => {
   it("returns registered tool by namespaced name", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]), "myplugin");
 
     const tool = registry.getTool("myplugin:foo");
     expect(tool).not.toBeNull();
@@ -238,7 +238,7 @@ describe("getTool", () => {
 
   it("returns null after plugin is unregistered", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]), "myplugin");
     registry.unregisterPlugin("myplugin");
     expect(registry.getTool("myplugin:foo")).toBeNull();
   });
@@ -247,7 +247,7 @@ describe("getTool", () => {
 describe("getToolByPlugin", () => {
   it("returns registered tool by plugin + bare name", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("acme.linear", makeManifest("acme.linear", [makeTool("search-issues")]));
+    registry.registerPlugin("acme.linear", makeManifest("acme.linear", [makeTool("search-issues")]), "acme.linear");
 
     const tool = registry.getToolByPlugin("acme.linear", "search-issues");
     expect(tool).not.toBeNull();
@@ -261,7 +261,7 @@ describe("getToolByPlugin", () => {
 
   it("returns null for unknown tool within a registered plugin", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]), "myplugin");
     expect(registry.getToolByPlugin("myplugin", "bar")).toBeNull();
   });
 });
@@ -273,8 +273,8 @@ describe("getToolByPlugin", () => {
 describe("listTools", () => {
   it("returns all tools when no filter is provided", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]));
-    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]));
+    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]), "plugin-a");
+    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]), "plugin-b");
 
     const all = registry.listTools();
     expect(all).toHaveLength(3);
@@ -284,8 +284,8 @@ describe("listTools", () => {
 
   it("filters by pluginId when filter.pluginId is provided", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]));
-    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]));
+    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x"), makeTool("y")]), "plugin-a");
+    registry.registerPlugin("plugin-b", makeManifest("plugin-b", [makeTool("z")]), "plugin-b");
 
     const aTools = registry.listTools({ pluginId: "plugin-a" });
     expect(aTools).toHaveLength(2);
@@ -294,7 +294,7 @@ describe("listTools", () => {
 
   it("returns empty array for unknown plugin in filter", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x")]));
+    registry.registerPlugin("plugin-a", makeManifest("plugin-a", [makeTool("x")]), "plugin-a");
 
     expect(registry.listTools({ pluginId: "nonexistent" })).toEqual([]);
   });
@@ -306,7 +306,7 @@ describe("listTools", () => {
 
   it("returns empty array for a plugin filter with empty tool set after unregister", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("p", makeManifest("p", [makeTool("a")]));
+    registry.registerPlugin("p", makeManifest("p", [makeTool("a")]), "p");
     registry.unregisterPlugin("p");
     expect(registry.listTools({ pluginId: "p" })).toEqual([]);
   });
@@ -319,15 +319,15 @@ describe("listTools", () => {
 describe("toolCount", () => {
   it("returns total count when no pluginId given", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]));
-    registry.registerPlugin("b", makeManifest("b", [makeTool("z")]));
+    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]), "a");
+    registry.registerPlugin("b", makeManifest("b", [makeTool("z")]), "b");
     expect(registry.toolCount()).toBe(3);
   });
 
   it("returns per-plugin count when pluginId is given", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]));
-    registry.registerPlugin("b", makeManifest("b", [makeTool("z")]));
+    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]), "a");
+    registry.registerPlugin("b", makeManifest("b", [makeTool("z")]), "b");
     expect(registry.toolCount("a")).toBe(2);
     expect(registry.toolCount("b")).toBe(1);
   });
@@ -339,7 +339,7 @@ describe("toolCount", () => {
 
   it("decrements after unregisterPlugin", () => {
     const registry = createPluginToolRegistry();
-    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]));
+    registry.registerPlugin("a", makeManifest("a", [makeTool("x"), makeTool("y")]), "a");
     registry.unregisterPlugin("a");
     expect(registry.toolCount()).toBe(0);
     expect(registry.toolCount("a")).toBe(0);
@@ -353,7 +353,7 @@ describe("toolCount", () => {
 describe("executeTool", () => {
   it("throws when no workerManager is configured", async () => {
     const registry = createPluginToolRegistry(); // no workerManager
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("foo")]), "myplugin");
 
     await expect(registry.executeTool("myplugin:foo", {}, runContext)).rejects.toThrow(
       "no worker manager configured",
@@ -413,13 +413,13 @@ describe("executeTool", () => {
     });
   });
 
-  it("uses pluginId as dbId when pluginDbId was not provided during registerPlugin", async () => {
+  it("uses pluginId as dbId when pluginId is passed as pluginDbId", async () => {
     const mockWorkerManager = {
       isRunning: vi.fn().mockReturnValue(true),
       call: vi.fn().mockResolvedValue({ content: "ok" }),
     } as unknown as PluginWorkerManager;
     const registry = createPluginToolRegistry(mockWorkerManager);
-    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("run")]));
+    registry.registerPlugin("myplugin", makeManifest("myplugin", [makeTool("run")]), "myplugin");
 
     await registry.executeTool("myplugin:run", {}, runContext);
 
