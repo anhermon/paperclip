@@ -69,6 +69,7 @@ import type {
 } from "./types.js";
 import type {
   JsonRpcId,
+  JsonRpcMessage,
   JsonRpcNotification,
   JsonRpcRequest,
   JsonRpcResponse,
